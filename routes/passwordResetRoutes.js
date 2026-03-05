@@ -22,12 +22,47 @@ router.post("/forgot-password", async (req, res) => {
     [email, code]
   );
 
-  await resend.emails.send({
-    from: process.env.FROM_EMAIL,
-    to: email,
-    subject: "Password Reset Code",
-    html: `<h2>${code}</h2><p>Valid for 10 minutes</p>`,
-  });
+ await resend.emails.send({
+  from: process.env.FROM_EMAIL,
+  to: email,
+  subject: "Xylos Password Reset Verification Code",
+  html: `
+  <div style="font-family: Arial, sans-serif; background:#f4f6f8; padding:30px;">
+    <div style="max-width:520px; margin:auto; background:#ffffff; padding:30px; border-radius:8px;">
+      
+      <h2 style="color:#222;">Password Reset Request</h2>
+
+      <p>
+        We received a request to reset the password for your <strong>Xylos</strong> account.
+        To continue with the password reset process, please use the verification code below.
+      </p>
+
+      <div style="text-align:center; margin:25px 0;">
+        <div style="display:inline-block; padding:15px 25px; font-size:28px; letter-spacing:6px; 
+        background:#f1f3f5; border-radius:6px; font-weight:bold;">
+          ${code}
+        </div>
+      </div>
+
+      <p>
+        This verification code will remain valid for <strong>10 minutes</strong>.
+        For security reasons, please do not share this code with anyone.
+      </p>
+
+      <p>
+        If you did not request a password reset, you can safely ignore this email.
+        Your account will remain secure.
+      </p>
+
+      <p style="margin-top:30px;">
+        Regards,<br>
+        <strong>Xylos Support Team</strong>
+      </p>
+
+    </div>
+  </div>
+  `,
+});
 
   res.json({ success: true });
 });

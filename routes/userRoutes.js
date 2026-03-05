@@ -51,12 +51,42 @@ router.post("/send-otp", async (req, res) => {
       [email, otp]
     );
 
-    await resend.emails.send({
-      from: process.env.FROM_EMAIL,
-      to: email,
-      subject: "Your OTP Code",
-      html: `<h2>Your OTP is ${otp}</h2><p>Valid for 5 minutes</p>`,
-    });
+  await resend.emails.send({
+  from: process.env.FROM_EMAIL,
+  to: email,
+  subject: "Welcome to Xylos – Your Verification Code",
+  html: `
+  <div style="font-family: Arial, sans-serif; line-height:1.6; color:#333;">
+    
+    <h2 style="color:#2c7be5;">Welcome to Xylos 🚀</h2>
+
+    <p>
+      Thank you for joining <strong>Xylos</strong>. We’re excited to have you as part of our community. 
+      To complete your verification and continue using the platform securely, please use the 
+      One-Time Password (OTP) below.
+    </p>
+
+    <div style="margin:20px 0; padding:15px; background:#f4f6f8; text-align:center; border-radius:6px;">
+      <h1 style="letter-spacing:5px; margin:0;">${otp}</h1>
+    </div>
+
+    <p>
+      This verification code is valid for <strong>5 minutes</strong>. Please do not share this code 
+      with anyone for security reasons.
+    </p>
+
+    <p>
+      If you did not request this verification, you can safely ignore this email.
+    </p>
+
+    <p>
+      Welcome aboard,<br>
+      <strong>The Xylos Team</strong>
+    </p>
+
+  </div>
+  `,
+});
 
     res.json({ success: true });
   } catch (err) {
