@@ -2,8 +2,19 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../db/db");
+const { distributeLevelCommission } = require("../services/commissionService");
 
-const startCommissionCycle = require("../utils/commissionStarter");
+// ⭐ START COMMISSION CYCLE
+const startCommissionCycle = async (client, userId) => {
+  await client.query(
+    `
+    INSERT INTO trade_commission_cycles (user_id, started_at, last_paid_at)
+    VALUES ($1, NOW(), NULL)
+    ON CONFLICT (user_id) DO NOTHING
+    `,
+    [userId]
+  );
+};
 
 router.post("/send", async (req, res) => {
   const { senderId, recipientAddress, amount } = req.body;
@@ -106,6 +117,7 @@ router.post("/transfer", async (req, res) => {
 
    // ================= MAIN → TRADE =================
 if (type === "MAIN_TO_TRADE") {
+
   const { rows } = await client.query(
     `SELECT wallet_amount, trading_wallet_amount
      FROM users
@@ -118,8 +130,7 @@ if (type === "MAIN_TO_TRADE") {
     throw new Error("Insufficient main wallet balance");
   }
 
-  const beforeBalance = Number(rows[0].trading_wallet_amount);
-
+  // 1️⃣ Deduct from main
   await client.query(
     `UPDATE users
      SET wallet_amount = wallet_amount - $1,
@@ -128,14 +139,21 @@ if (type === "MAIN_TO_TRADE") {
     [amount, userId]
   );
 
-  const afterBalance = beforeBalance + amount;
+  // 2️⃣ 🔥 ADD THIS LINE (VERY IMPORTANT)
+  await distributeLevelCommission(client, userId, amount);
 
-  // ⭐ START COMMISSION WHEN FIRST TIME >=100
-  if (beforeBalance < 100 && afterBalance >= 100) {
-    await startCommissionCycle(userId);
-  }
+  // 🔔 Notify user about transfer
+await client.query(
+  `INSERT INTO notifications 
+   (title, message, target_type, target_users)
+   VALUES ($1, $2, 'custom', $3)`,
+  [
+    "Transfer Successful",
+    `You transferred $${amount} from Main Wallet to Trading Wallet.`,
+    String(userId)   // store as text
+  ]
+);
 }
-
     // ================= TRADE → MAIN =================
   else if (type === "TRADE_TO_MAIN") {
 
@@ -361,6 +379,10 @@ router.post("/admin/trade-wallet/approve", async (req, res) => {
     const sentAmount = withdrawal.requested_amount - deduction;
 
     // 💰 UPDATE wallets (NO BALANCE CHECK)
+    if (Number(userRes.rows[0].trading_wallet_amount) < withdrawal.requested_amount) {
+  throw new Error("Insufficient trading wallet balance");
+}
+
     await client.query(`
       UPDATE users
       SET
@@ -400,6 +422,130 @@ router.post("/admin/trade-wallet/approve", async (req, res) => {
     await client.query("ROLLBACK");
     console.error("APPROVE ERROR:", err.message);
     res.status(400).json({ message: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+router.post("/distribute-commission", async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    // 1️⃣ Ensure row exists
+    await client.query(`
+      INSERT INTO system_settings (key, value)
+      VALUES ('last_commission_run', NULL)
+      ON CONFLICT (key) DO NOTHING
+    `);
+
+    // 2️⃣ Lock row
+    const settingRes = await client.query(
+      `SELECT value
+       FROM system_settings
+       WHERE key = 'last_commission_run'
+       FOR UPDATE`
+    );
+
+    const lastRun = settingRes.rows[0].value;
+
+    // 3️⃣ 24 hour check
+    if (lastRun) {
+      const diffMs = Date.now() - new Date(lastRun).getTime();
+      const diffHours = diffMs / (1000 * 60 * 60);
+
+      if (diffHours < 24) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          message: `Already distributed. Try again in ${(
+            24 - diffHours
+          ).toFixed(2)} hours`,
+        });
+      }
+    }
+
+ const users = await client.query(`
+  SELECT 
+  u.id,
+  u.trading_wallet_amount,
+  u.auto_trade,
+  (
+    SELECT COUNT(*)
+    FROM users r
+    WHERE r.parent_id = u.id
+  ) AS referral_count
+FROM users u
+WHERE u.trading_wallet_amount > 100
+FOR UPDATE
+`);
+
+    let processed = 0;
+for (const user of users.rows) {
+  const tradingBalance = Number(user.trading_wallet_amount);
+  const referralCount = Number(user.referral_count);
+
+  // 🔥 Dynamic Rate
+  const commissionRate = 1.6 + (referralCount * 0.05);
+
+  const commissionAmount = Number(
+    ((tradingBalance * commissionRate) / 100).toFixed(2)
+  );
+
+  let walletType = "";
+
+  if (user.auto_trade === true) {
+    await client.query(
+      `UPDATE users
+       SET trading_wallet_amount = trading_wallet_amount + $1
+       WHERE id = $2`,
+      [commissionAmount, user.id]
+    );
+
+    walletType = "Trading Wallet";
+  } else {
+    await client.query(
+      `UPDATE users
+       SET wallet_amount = wallet_amount + $1
+       WHERE id = $2`,
+      [commissionAmount, user.id]
+    );
+
+    walletType = "Main Wallet";
+  }
+
+  await client.query(
+    `
+    INSERT INTO notifications (title, message, target_type, target_users)
+    VALUES ($1, $2, 'custom', $3)
+    `,
+    [
+      "Daily Commission Credited",
+      `₹${commissionAmount} (${commissionRate.toFixed(2)}%) credited to your ${walletType}. You have ${referralCount} referrals.`,
+      String(user.id)
+    ]
+  );
+
+  processed++;
+}
+    // 4️⃣ Update timestamp
+    await client.query(`
+      UPDATE system_settings
+      SET value = NOW()
+      WHERE key = 'last_commission_run'
+    `);
+
+    await client.query("COMMIT");
+
+    res.json({
+      success: true,
+      users: processed,
+    });
+
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("❌ COMMISSION ERROR:", err.message);
+    res.status(500).json({ message: err.message });
   } finally {
     client.release();
   }

@@ -3,27 +3,60 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../db/db");
 
-// Get all custom rates
+/*
+  DAILY RESET LOGIC:
+  If rate was updated before today,
+  reset it to 0 automatically.
+*/
+
+// ✅ Get all custom rates (with auto reset)
 router.get("/custom-rates", async (req, res) => {
-  const { rows } = await pool.query(
-    `SELECT symbol, rate FROM market_custom_rates`
-  );
-  res.json(rows);
+  try {
+    // 🔥 Reset if last updated date is before today
+    await pool.query(`
+      UPDATE market_custom_rates
+      SET rate = 0
+      WHERE updated_at::date < CURRENT_DATE
+    `);
+
+    const { rows } = await pool.query(`
+      SELECT symbol, rate
+      FROM market_custom_rates
+    `);
+
+    res.json(rows);
+  } catch (err) {
+    console.error("Custom rates fetch error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
 });
 
-// Update single rate
+// ✅ Update single rate (also update timestamp)
 router.post("/custom-rate", async (req, res) => {
-  const { symbol, rate } = req.body;
+  try {
+    const { symbol, rate } = req.body;
 
-  await pool.query(`
-    INSERT INTO market_custom_rates(symbol, rate)
-    VALUES($1,$2)
-    ON CONFLICT(symbol)
-    DO UPDATE SET rate = EXCLUDED.rate
-  `,[symbol, rate]);
+    await pool.query(
+      `
+      INSERT INTO market_custom_rates(symbol, rate, updated_at)
+      VALUES($1,$2,NOW())
+      ON CONFLICT(symbol)
+      DO UPDATE SET
+        rate = EXCLUDED.rate,
+        updated_at = NOW()
+      `,
+      [symbol, rate]
+    );
 
-  res.json({ success:true });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Save custom rate error:", err);
+    res.status(500).json({ error: "Update failed" });
+  }
 });
+
+
+// ================= ADMIN COINS =================
 
 router.get("/admin-coins", async (req,res)=>{
   try {
@@ -35,7 +68,7 @@ router.get("/admin-coins", async (req,res)=>{
     console.error("Admin coins error:", err);
     res.status(500).json({error:"Server error"});
   }
-});
+}); 
 
 // ADD
 router.post("/admin-coins", async (req,res)=>{
@@ -72,9 +105,27 @@ router.put("/admin-coins/:id", async (req,res)=>{
   }
 });
 
+// 🔥 MANUAL RESET ALL CUSTOM RATES
+router.post("/custom-rates/reset-all", async (req, res) => {
+  try {
+    await pool.query(`
+      UPDATE market_custom_rates
+      SET rate = 0,
+          updated_at = NOW()
+    `);
+
+    res.json({ success: true, message: "All custom rates reset to 0" });
+  } catch (err) {
+    console.error("Manual reset error:", err);
+    res.status(500).json({ error: "Reset failed" });
+  }
+});
 // DELETE
 router.delete("/admin-coins/:id", async (req,res)=>{
-  await pool.query(`DELETE FROM admin_coins WHERE id=$1`,[req.params.id]);
+  await pool.query(
+    `DELETE FROM admin_coins WHERE id=$1`,
+    [req.params.id]
+  );
   res.json({success:true});
 });
 

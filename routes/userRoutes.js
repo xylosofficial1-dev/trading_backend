@@ -352,6 +352,39 @@ router.post("/wallet/send", async (req, res) => {
   }
 });
 
+/* =========================================
+   CHECK COMMISSION LOCK
+   GET /api/system/commission-status
+========================================= */
+router.get("/commission-status", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT last_run FROM commission_runs ORDER BY id DESC LIMIT 1`
+    );
+
+    if (!result.rowCount) {
+      return res.json({ locked: false });
+    }
+
+    const lastRun = new Date(result.rows[0].last_run);
+    const now = new Date();
+
+    const diff = (now - lastRun) / (1000 * 60 * 60);
+
+    if (diff < 24) {
+      const remaining = (24 - diff).toFixed(2);
+      return res.json({
+        locked: true,
+        remaining,
+      });
+    }
+
+    res.json({ locked: false });
+  } catch (err) {
+    console.error("COMMISSION STATUS ERROR:", err);
+    res.status(500).json({ error: "Failed to check status" });
+  }
+});
 router.post("/trade", async (req, res) => {
   const { userId, coin, tradeType, price, quantity } = req.body;
   const total = price * quantity;
@@ -362,7 +395,7 @@ router.post("/trade", async (req, res) => {
     await client.query("BEGIN");
 
     const userRes = await client.query(
-      "SELECT name, email, wallet_amount FROM users WHERE id = $1 FOR UPDATE",
+      "SELECT name, email, trading_wallet_amount FROM users WHERE id = $1 FOR UPDATE",
       [userId]
     );
 
@@ -371,8 +404,8 @@ router.post("/trade", async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const { name, email, wallet_amount } = userRes.rows[0];
-    let walletAmount = Number(wallet_amount);
+    const { name, email, trading_wallet_amount } = userRes.rows[0];
+let walletAmount = Number(trading_wallet_amount);
 
     // ❌ BUY CHECK
     if (tradeType === "buy" && walletAmount < total) {
@@ -383,7 +416,7 @@ router.post("/trade", async (req, res) => {
 const newWallet = walletAmount - total; // always deduct
 
     await client.query(
-      "UPDATE users SET wallet_amount = $1 WHERE id = $2",
+      "UPDATE users SET trading_wallet_amount = $1 WHERE id = $2",
       [newWallet, userId]
     );
 
