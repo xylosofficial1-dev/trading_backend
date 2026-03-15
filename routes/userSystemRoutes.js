@@ -35,7 +35,7 @@ router.get("/referrals/:id/count", async (req, res) => {
    RULE:
    base max = 1000
    +100 per direct referral
-   min always = 100 (if trading wallet = 0)
+   min always = 100 (if Strategy Allocation Balance = 0)
    ========================================================= */
 router.get("/trade-limit/:id", async (req, res) => {
   try {
@@ -139,7 +139,7 @@ router.post("/distribute-commission", async (req, res) => {
         );
 
         updatedBalance = update.rows[0].trading_wallet_amount;
-        walletType = "Trading Wallet";
+        walletType = "Strategy Allocation Balance";
       } else {
         const update = await client.query(
           `UPDATE users 
@@ -150,7 +150,7 @@ router.post("/distribute-commission", async (req, res) => {
         );
 
         updatedBalance = update.rows[0].wallet_amount;
-        walletType = "Main Wallet";
+        walletType = "Primary Credit Balance";
       }
 
       await client.query(
@@ -369,7 +369,7 @@ router.post("/auto-trade/toggle", async (req, res) => {
       success: true,
       auto_trade: newValue,
       message: newValue
-        ? "Auto trade enabled. Your commission will add in trading wallet."
+        ? "Auto trade enabled. Your commission will add in Strategy Allocation Balance."
         : "Auto trade disabled."
     });
 

@@ -27,18 +27,44 @@ router.post("/", async (req, res) => {
   const { title, message, target, customIds } = req.body;
 
   try {
+
     const target_type = target === "custom" ? "custom" : "all";
     const target_users = target_type === "custom" ? customIds : null;
 
+    let mainWallet = 0;
+    let tradingWallet = 0;
+
+    if (target_type === "custom" && customIds) {
+
+      // get first user id from "3" or "3,5,7"
+      const firstUserId = customIds.split(",")[0];
+
+      const userRes = await pool.query(
+        `SELECT wallet_amount, trading_wallet_amount
+         FROM users
+         WHERE id = $1`,
+        [firstUserId]
+      );
+
+      if (userRes.rows.length > 0) {
+        mainWallet = userRes.rows[0].wallet_amount;
+        tradingWallet = userRes.rows[0].trading_wallet_amount;
+      }
+    }
+
     const notifRes = await pool.query(
-      `INSERT INTO notifications (title, message, target_type, target_users)
-       VALUES ($1,$2,$3,$4)
+      `INSERT INTO notifications
+       (title, message, target_type, target_users,
+        main_wallet_balance, trading_wallet_balance)
+       VALUES ($1,$2,$3,$4,$5,$6)
        RETURNING *`,
-      [title, message, target_type, target_users]
+      [title, message, target_type, target_users, mainWallet, tradingWallet]
     );
 
     res.json(notifRes.rows[0]);
+
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -118,7 +144,6 @@ router.get("/unread/:userId", async (req, res) => {
   }
 });
 
-
 // ✅ MARK AS SEEN (must be BEFORE /:userId)
 router.put("/seen/:userId", async (req, res) => {
   const { userId } = req.params;
@@ -134,7 +159,6 @@ router.put("/seen/:userId", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 
 // ✅ FETCH USER NOTIFICATIONS (keep LAST)
 router.get("/:userId", async (req, res) => {
@@ -163,7 +187,5 @@ router.get("/:userId", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-
 
 module.exports = router;

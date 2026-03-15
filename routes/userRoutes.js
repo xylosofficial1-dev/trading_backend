@@ -548,4 +548,84 @@ router.post("/referrals/set-parent", async (req, res) => {
   }
 });
 
+router.post("/online", async (req, res) => {
+  try {
+    const { user_id, status } = req.body;
+
+    console.log("USER:", user_id);
+    console.log("STATUS:", status);
+
+    if (status === undefined) {
+
+      // heartbeat → only update last_seen
+      await pool.query(
+        `UPDATE users
+         SET last_seen = NOW()
+         WHERE id = $1`,
+        [user_id]
+      );
+
+    } else {
+
+      // manual online/offline
+      await pool.query(
+        `UPDATE users
+         SET is_online = $2,
+             last_seen = NOW()
+         WHERE id = $1`,
+        [user_id, status]
+      );
+
+    }
+
+    res.json({ success: true });
+
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ success: false });
+  }
+});
+
+router.get("/account-status/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `SELECT 
+        last_seen,
+        is_online,
+        CASE
+          WHEN last_seen < NOW() - INTERVAL '30 seconds'
+          THEN false
+          ELSE is_online
+        END AS computed_online
+      FROM users
+      WHERE id=$1`,
+      [id]
+    );
+
+    const row = result.rows[0];
+
+    if (!row) return res.status(404).json({ error: "User not found" });
+
+    // auto set offline if heartbeat stopped
+    if (row.last_seen < new Date(Date.now() - 30000)) {
+      await pool.query(
+        `UPDATE users SET is_online = false WHERE id=$1`,
+        [id]
+      );
+    }
+
+    res.json({
+      is_online: row.computed_online,
+      last_seen: row.last_seen
+    });
+
+  } catch (err) {
+    console.log(err);
+  }
+});
+
+
+
 module.exports = router;

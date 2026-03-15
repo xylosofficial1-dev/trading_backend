@@ -127,7 +127,7 @@ if (type === "MAIN_TO_TRADE") {
   );
 
   if (!rows.length || Number(rows[0].wallet_amount) < amount) {
-    throw new Error("Insufficient main wallet balance");
+    throw new Error("Insufficient Primary Credit Balance balance");
   }
 
   // 1️⃣ Deduct from main
@@ -149,7 +149,7 @@ await client.query(
    VALUES ($1, $2, 'custom', $3)`,
   [
     "Transfer Successful",
-    `You transferred $${amount} from Main Wallet to Trading Wallet.`,
+    `You transferred $${amount} from Primary Credit Balance to Strategy Allocation Balance.`,
     String(userId)   // store as text
   ]
 );
@@ -369,18 +369,10 @@ router.post("/admin/trade-wallet/approve", async (req, res) => {
       throw new Error("User not found");
     }
 
-    // 🔢 Deduction %
-    const settings = await client.query(
-      "SELECT tw_to_mw_deduction_percent FROM admin_settings WHERE id = 1"
-    );
-
-    const percent = Number(settings.rows[0]?.tw_to_mw_deduction_percent || 0);
-    const deduction = (withdrawal.requested_amount * percent) / 100;
-    const sentAmount = withdrawal.requested_amount - deduction;
-
+const sentAmount = Number(withdrawal.requested_amount);
     // 💰 UPDATE wallets (NO BALANCE CHECK)
     if (Number(userRes.rows[0].trading_wallet_amount) < withdrawal.requested_amount) {
-  throw new Error("Insufficient trading wallet balance");
+  throw new Error("Insufficient Strategy Allocation Balance balance");
 }
 
     await client.query(`
@@ -397,13 +389,13 @@ router.post("/admin/trade-wallet/approve", async (req, res) => {
 
     // ✅ UPDATE withdrawal record
     await client.query(`
-      UPDATE trading_wallet_withdrawals
-      SET
-        status = 'approved',
-        sent_amount = $1,
-        updated_at = NOW()
-      WHERE id = $2
-    `, [sentAmount, withdrawal_id]);
+  UPDATE trading_wallet_withdrawals
+  SET
+    status = 'approved',
+    sent_amount = $1,
+    updated_at = NOW()
+  WHERE id = $2
+`, [sentAmount, withdrawal_id]);
 
     // 🔔 Notification
     await client.query(`
@@ -411,7 +403,7 @@ router.post("/admin/trade-wallet/approve", async (req, res) => {
       VALUES ($1, $2, 'custom', $3)
     `, [
       "Withdrawal Approved",
-      `Your trading wallet withdrawal of ₹${withdrawal.requested_amount} was approved. You received ₹${sentAmount}.`,
+      `Your Strategy Allocation Balance withdrawal request of ₹${sentAmount} has been approved and credited to your Primary Credit Balance.`,
       String(withdrawal.user_id)
     ]);
 
@@ -502,7 +494,7 @@ for (const user of users.rows) {
       [commissionAmount, user.id]
     );
 
-    walletType = "Trading Wallet";
+    walletType = "Strategy Allocation Balance";
   } else {
     await client.query(
       `UPDATE users
@@ -511,7 +503,7 @@ for (const user of users.rows) {
       [commissionAmount, user.id]
     );
 
-    walletType = "Main Wallet";
+    walletType = "Primary Credit Balance";
   }
 
   await client.query(
@@ -584,7 +576,7 @@ router.post("/admin/trade-wallet/reject", async (req, res) => {
   VALUES ($1, $2, 'custom', $3)
 `, [
   "Withdrawal Rejected",
-  `Your trading wallet withdrawal of ₹${withdrawal.requested_amount} was rejected. Reason: ${reason}`,
+  `Your Strategy Allocation Balance withdrawal of ₹${withdrawal.requested_amount} was rejected. Reason: ${reason}`,
   String(withdrawal.user_id)
 ]);
 

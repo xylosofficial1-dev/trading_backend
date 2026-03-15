@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../db/db");
 const multer = require("multer");
+const processReferralTask = require("../utils/referralTaskProcessor");
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -191,6 +192,7 @@ router.put("/:id/approve", async (req, res) => {
        WHERE id = $2`,
       [payment.amount_usd, payment.user_id]
     );
+    await processReferralTask(payment.user_id);
 
     // 4️⃣ Insert notification
     await client.query(

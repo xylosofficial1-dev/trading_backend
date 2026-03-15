@@ -41,7 +41,7 @@ router.post("/buy", async (req, res) => {
       return res.status(400).json({ error: "Insufficient trading balance" });
     }
 
-    // 3️⃣ Deduct from trading wallet
+    // 3️⃣ Deduct from Strategy Allocation Balance
     await client.query(
       `UPDATE users
        SET trading_wallet_amount = trading_wallet_amount - $1
@@ -121,7 +121,7 @@ router.post("/close/:id", async (req, res) => {
       [profit, resultType, tradeId]
     );
 
-    // 2️⃣ Update TRADING wallet (NOT main wallet)
+    // 2️⃣ Update Strategy Allocation Balance (NOT Primary Credit Balance)
     await client.query(
       `UPDATE users
        SET trading_wallet_amount = trading_wallet_amount + $1
