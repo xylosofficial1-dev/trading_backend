@@ -120,7 +120,7 @@ router.post("/verify-otp", async (req, res) => {
     res.status(500).json({ error: "OTP verification failed" });
   }
 });
-
+ 
 router.post("/register", async (req, res) => {
   try {
     const {
@@ -193,8 +193,11 @@ router.post("/register", async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Registration failed" });
+   console.error("REGISTER ERROR:", err.message);
+
+res.status(500).json({
+  error: err.message, // ✅ show real error
+});
   }
 });
 
