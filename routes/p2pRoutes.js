@@ -100,6 +100,69 @@ router.get("/can-create-request/:userId/:listingId", async (req, res) => {
   }
 });
 
+// Cancel listing (only if active)
+router.delete("/delete-listing/:listingId/:userId", async (req, res) => {
+  try {
+    const { listingId, userId } = req.params;
+
+    const listing = await pool.query(
+      `SELECT status, user_id
+       FROM p2p_sell_listings
+       WHERE id=$1`,
+      [listingId]
+    );
+
+    if (listing.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Listing not found"
+      });
+    }
+
+    const data = listing.rows[0];
+
+    if (data.user_id != userId) {
+      return res.status(403).json({
+        success: false,
+        error: "Unauthorized"
+      });
+    }
+
+    if (data.status === "completed") {
+      return res.json({
+        success: false,
+        error: "Completed listing cannot be deleted"
+      });
+    }
+
+    if (data.status !== "active") {
+      return res.json({
+        success: false,
+        error: "Listing already inactive"
+      });
+    }
+
+    await pool.query(
+      `UPDATE p2p_sell_listings
+       SET status='cancelled'
+       WHERE id=$1`,
+      [listingId]
+    );
+
+    res.json({
+      success: true,
+      message: "Listing cancelled successfully"
+    });
+
+  } catch (err) {
+    console.log("Delete listing error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Server error"
+    });
+  }
+});
+
 // Create buy request
 router.post("/create-buy-request", async (req, res) => {
   const { listing_id, buyer_id, quantity } = req.body;
@@ -573,7 +636,7 @@ router.get("/payment-proof/:requestId", async (req, res) => {
 
     res.json({
       tx_id: payment.tx_id,
-      screenshot: payment.screenshot.toString("base64")
+      screenshot: `data:image/png;base64,${payment.screenshot.toString("base64")}`
     });
   } catch (err) {
     console.log(err);

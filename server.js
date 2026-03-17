@@ -55,7 +55,7 @@ const adminDataRoutes = require("./routes/adminDataRoutes");
 const swapRoutes = require("./routes/swapRoutes");
 
 const { router: p2pRoutes, checkExpiredTrades } = require("./routes/p2pRoutes");
-
+ 
 // USE ROUTES
 app.use("/api/transactions", transactionsRoute);
 app.use("/api/auth", authRoutes);
@@ -79,6 +79,7 @@ app.use("/api/videos", require("./routes/videoRoutes"));
 app.use("/api/referral-task", require("./routes/referralTaskIncomeRoutes"));
 app.use("/api/test", require("./routes/testRoutes"));
 app.use("/api/monthly-salary", require("./routes/monthlySalaryRoutes"));
+app.use("/api/admin-income", require("./routes/adminIncomeRoutes"));
 
 // Check expired trades every minute
 setInterval(() => {

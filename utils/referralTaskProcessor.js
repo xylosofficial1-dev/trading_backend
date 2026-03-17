@@ -1,3 +1,4 @@
+// backend/utils/referraltaskProce
 const pool = require("../db/db");
 
 const rewardRules = [
@@ -21,7 +22,7 @@ const rewardRules = [
   { deposit: 1850, referrals: 85, reward: 11200 },
   { deposit: 1850, referrals: 185, reward: 23200 },
 ];
-
+ 
 async function processReferralTask(userId) {
 
   const client = await pool.connect();

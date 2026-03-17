@@ -27,4 +27,4 @@ function getSalary(business) {
 
 }
 
-module.exports = getSalary;
+module.exports = { getSalary, rules };
