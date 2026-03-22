@@ -26,14 +26,55 @@ router.post("/create-listing", upload.single('qr_image'), async (req, res) => {
 
     const qrImageBuffer = req.file ? req.file.buffer : null;
 
-    console.log("Creating listing with data:", {
-      user_id,
-      price,
-      quantity,
-      payment_method,
-      hasQR: !!qrImageBuffer
-    });
+    const sellQty = parseFloat(quantity);
 
+    // ❌ INVALID INPUT CHECK
+    if (!sellQty || sellQty <= 0) {
+      return res.json({
+        success: false,
+        error: "Invalid quantity"
+      });
+    }
+
+    // ✅ 1. GET USER WALLET
+    const userWallet = await pool.query(
+      `SELECT wallet_amount FROM users WHERE id = $1`,
+      [user_id]
+    );
+
+    if (userWallet.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found"
+      });
+    }
+
+    const walletBalance = parseFloat(userWallet.rows[0].wallet_amount);
+
+    // ✅ 2. GET TOTAL ACTIVE LISTINGS (VERY IMPORTANT)
+    const activeListings = await pool.query(
+      `SELECT COALESCE(SUM(quantity), 0) as total
+       FROM p2p_sell_listings
+       WHERE user_id = $1 AND status = 'active'`,
+      [user_id]
+    );
+
+    const alreadyListed = parseFloat(activeListings.rows[0].total);
+
+    // ✅ 3. FINAL CHECK
+    const totalAfterListing = alreadyListed + sellQty;
+
+    if (totalAfterListing > walletBalance) {
+      return res.json({
+        success: false,
+        error: `Insufficient balance. 
+You have ${walletBalance} USDT,
+Already listed: ${alreadyListed},
+You can list only ${(walletBalance - alreadyListed).toFixed(2)} USDT more`
+      });
+    }
+
+    // ✅ 4. CREATE LISTING
     const result = await pool.query(
       `INSERT INTO p2p_sell_listings
       (user_id, coin_name, price, quantity, description, payment_method, 
@@ -53,19 +94,17 @@ router.post("/create-listing", upload.single('qr_image'), async (req, res) => {
       ]
     );
 
-    console.log("Listing created successfully:", result.rows[0].id);
-    
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: "Listing created successfully",
-      listing: result.rows[0] 
+      listing: result.rows[0]
     });
 
   } catch (err) {
     console.error("Create listing error:", err);
-    res.status(500).json({ 
-      success: false, 
-      error: "Server error: " + err.message 
+    res.status(500).json({
+      success: false,
+      error: "Server error: " + err.message
     });
   }
 });
@@ -168,6 +207,7 @@ router.post("/create-buy-request", async (req, res) => {
   const { listing_id, buyer_id, quantity } = req.body;
 
   try {
+    // Check existing active trade
     const existing = await pool.query(
       `SELECT * FROM p2p_buy_requests
        WHERE listing_id=$1 
@@ -184,19 +224,30 @@ router.post("/create-buy-request", async (req, res) => {
       });
     }
 
-    const listing = await pool.query(
+    // Fetch listing details
+    const listingResult = await pool.query(
       "SELECT user_id, price FROM p2p_sell_listings WHERE id=$1",
       [listing_id]
     );
 
-    const sellerId = listing.rows[0].user_id;
+    if (listingResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Listing not found"
+      });
+    }
 
+    const listing = listingResult.rows[0];
+    const sellerId = listing.user_id;
+    const price = listing.price; // ✅ IMPORTANT
+
+    // Insert request with dynamic price
     const trade = await pool.query(`
       INSERT INTO p2p_buy_requests
       (listing_id, buyer_id, seller_id, quantity, price, status, created_at)
-      VALUES ($1, $2, $3, $4, 80, 'pending', NOW())
+      VALUES ($1, $2, $3, $4, $5, 'pending', NOW())
       RETURNING *
-    `, [listing_id, buyer_id, sellerId, quantity]);
+    `, [listing_id, buyer_id, sellerId, quantity, price]);
 
     const io = req.app.get("io");
     const onlineUsers = req.app.get("onlineUsers");
@@ -206,7 +257,7 @@ router.post("/create-buy-request", async (req, res) => {
     if (sellerSocket) {
       io.to(sellerSocket).emit("new-buy-request", {
         ...trade.rows[0],
-        buyer_name: "Buyer" // You can fetch actual name if needed
+        buyer_name: "Buyer"
       });
     }
 
@@ -216,7 +267,7 @@ router.post("/create-buy-request", async (req, res) => {
     });
 
   } catch (err) {
-    console.log(err);
+    console.log("Create buy request error:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -383,33 +434,72 @@ router.post(
   }
 );
 
-// In p2pRoutes.js, update the confirm-payment endpoint:
-
-// Confirm payment (seller approves) - FIXED VERSION
 router.post("/confirm-payment", async (req, res) => {
+  const client = await pool.connect();
+
   try {
     const { request_id } = req.body;
 
+    await client.query("BEGIN");
+
     console.log("Confirming payment for request:", request_id);
 
-    // Get trade details
-    const request = await pool.query(
-      `SELECT r.*, l.quantity as listing_quantity, l.user_id as listing_owner
+    // ✅ 1. GET TRADE DETAILS
+    const request = await client.query(
+      `SELECT r.*, l.quantity as listing_quantity
        FROM p2p_buy_requests r
        JOIN p2p_sell_listings l ON l.id = r.listing_id
-       WHERE r.id=$1`,
+       WHERE r.id=$1
+       FOR UPDATE`,
       [request_id]
     );
 
     if (request.rows.length === 0) {
+      await client.query("ROLLBACK");
       return res.status(404).json({ error: "Request not found" });
     }
 
     const r = request.rows[0];
-    console.log("Trade details:", r);
 
-    // Insert into trade history
-    await pool.query(
+    const qty = parseFloat(r.quantity);
+
+    console.log("Trade:", r);
+
+    // ✅ 2. GET SELLER WALLET (LOCK ROW)
+    const sellerWallet = await client.query(
+      `SELECT wallet_amount FROM users WHERE id = $1 FOR UPDATE`,
+      [r.seller_id]
+    );
+
+    const sellerBalance = parseFloat(sellerWallet.rows[0].wallet_amount);
+
+    // ❌ SAFETY CHECK
+    if (sellerBalance < qty) {
+      await client.query("ROLLBACK");
+      return res.json({
+        success: false,
+        error: "Seller has insufficient balance"
+      });
+    }
+
+    // ✅ 3. DEDUCT FROM SELLER
+    await client.query(
+      `UPDATE users
+       SET wallet_amount = wallet_amount - $1
+       WHERE id = $2`,
+      [qty, r.seller_id]
+    );
+
+    // ✅ 4. ADD TO BUYER
+    await client.query(
+      `UPDATE users
+       SET wallet_amount = wallet_amount + $1
+       WHERE id = $2`,
+      [qty, r.buyer_id]
+    );
+
+    // ✅ 5. SAVE HISTORY
+    await client.query(
       `INSERT INTO p2p_trade_history
        (buyer_id, seller_id, listing_id, quantity, total)
        VALUES($1, $2, $3, $4, $5)`,
@@ -417,45 +507,54 @@ router.post("/confirm-payment", async (req, res) => {
         r.buyer_id,
         r.seller_id,
         r.listing_id,
-        r.quantity,
-        r.quantity * 80  // Fixed rate: 1 USDT = ₹80
+        qty,
+        qty * 80
       ]
     );
 
-    // Update request status to completed
-    await pool.query(
+    // ✅ 6. COMPLETE REQUEST
+    await client.query(
       `UPDATE p2p_buy_requests
        SET status='completed'
        WHERE id=$1`,
       [request_id]
     );
 
-    // Update listing status to completed
-    await pool.query(
-      `UPDATE p2p_sell_listings
-       SET status='completed'
-       WHERE id=$1`,
-      [r.listing_id]
-    );
+    // ✅ 7. UPDATE LISTING QUANTITY (IMPORTANT)
+    const remainingQty = parseFloat(r.listing_quantity) - qty;
 
+    if (remainingQty <= 0) {
+      await client.query(
+        `UPDATE p2p_sell_listings
+         SET status='completed', quantity=0
+         WHERE id=$1`,
+        [r.listing_id]
+      );
+    } else {
+      await client.query(
+        `UPDATE p2p_sell_listings
+         SET quantity=$1
+         WHERE id=$2`,
+        [remainingQty, r.listing_id]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    // ✅ SOCKET EVENTS (same as yours)
     const io = req.app.get("io");
     const onlineUsers = req.app.get("onlineUsers");
 
-    // Notify buyer
-    // Notify buyer
-const buyerSocket = onlineUsers[r.buyer_id];
-if (buyerSocket) {
-  console.log("Emitting trade-completed to buyer:", r.buyer_id);
-  io.to(buyerSocket).emit("trade-completed", {
-    request_id,
-    message: "Trade completed successfully"
-  });
-}
+    const buyerSocket = onlineUsers[r.buyer_id];
+    if (buyerSocket) {
+      io.to(buyerSocket).emit("trade-completed", {
+        request_id,
+        message: "Trade completed successfully"
+      });
+    }
 
-    // Notify seller
     const sellerSocket = onlineUsers[r.seller_id];
     if (sellerSocket) {
-      console.log("Emitting trade-confirmed to seller:", r.seller_id);
       io.to(sellerSocket).emit("trade-confirmed", {
         request_id,
         message: "Trade completed successfully"
@@ -463,9 +562,13 @@ if (buyerSocket) {
     }
 
     res.json({ success: true });
+
   } catch (err) {
+    await client.query("ROLLBACK");
     console.error("Confirm error:", err);
     res.status(500).json({ error: "Server error: " + err.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -684,6 +787,44 @@ router.get("/listings/:userId", async (req, res) => {
   }
 });
 
+// Get trade history by user (buyer OR seller)
+router.get("/trade-history/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const result = await pool.query(
+      `
+      SELECT 
+        id,
+        buyer_id,
+        seller_id,
+        listing_id,
+        quantity,
+        price,
+        total,
+        completed_at
+      FROM p2p_trade_history
+      WHERE buyer_id = $1 OR seller_id = $1
+      ORDER BY completed_at DESC
+      `,
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      count: result.rows.length,
+      data: result.rows
+    });
+
+  } catch (err) {
+    console.error("Trade history error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Server error"
+    });
+  }
+});
+
 // Get my sell listings
 router.get("/my-listings/:userId", async (req, res) => {
   const { userId } = req.params;
@@ -772,7 +913,7 @@ async function checkExpiredTrades(io, onlineUsers) {
         );
 
         // Add penalty notifications
-        const notificationMessage = `₹${penalty} deducted due to incomplete P2P trade`;
+        const notificationMessage = `$${penalty} deducted due to incomplete P2P trade`;
         
         await client.query(
           `INSERT INTO notifications (user_id, title, message, created_at)
@@ -809,7 +950,7 @@ async function checkExpiredTrades(io, onlineUsers) {
         if (buyerSocket) {
           io.to(buyerSocket).emit("trade-expired", {
             request_id: r.id,
-            message: `Trade expired. ₹${penalty} penalty deducted`
+            message: `Trade expired. $${penalty} penalty deducted`
           });
         }
 
@@ -818,11 +959,11 @@ async function checkExpiredTrades(io, onlineUsers) {
         if (sellerSocket) {
           io.to(sellerSocket).emit("trade-expired", {
             request_id: r.id,
-            message: `Trade expired. ₹${penalty} penalty deducted`
+            message: `Trade expired. $${penalty} penalty deducted`
           });
         }
 
-        console.log(`Trade ${r.id} expired, ₹${penalty} penalty deducted from users ${r.buyer_id} and ${r.seller_id}`);
+        console.log(`Trade ${r.id} expired, $${penalty} penalty deducted from users ${r.buyer_id} and ${r.seller_id}`);
 
       } catch (err) {
         await client.query('ROLLBACK');

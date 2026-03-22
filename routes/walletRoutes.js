@@ -71,7 +71,7 @@ router.post("/send", async (req, res) => {
     );
 
     // 🔹 Message format
-    const message = `${sender.name} sent ${receiver.name} ₹${amount} on ${new Date().toLocaleString()}`;
+    const message = `${sender.name} sent ${receiver.name} $${amount} on ${new Date().toLocaleString()}`;
 
     // 🔹 Store SAME message for both users
     await client.query(`
@@ -149,7 +149,7 @@ await client.query(
    VALUES ($1, $2, 'custom', $3)`,
   [
     "Transfer Successful",
-    `You transferred $${amount} from Primary Credit Balance to Strategy Allocation Balance.`,
+    `You transferred $${amount} from\n Primary Credit Balance to Strategy\n Allocation Balance.`,
     String(userId)   // store as text
   ]
 );
@@ -402,8 +402,8 @@ const sentAmount = Number(withdrawal.requested_amount);
       INSERT INTO notifications (title, message, target_type, target_users)
       VALUES ($1, $2, 'custom', $3)
     `, [
-      "Withdrawal Approved",
-      `Your Strategy Allocation Balance withdrawal request of ₹${sentAmount} has been approved and credited to your Primary Credit Balance.`,
+      "Transfer Approved",
+      `Your Strategy Allocation Balance withdrawal request of $${sentAmount} has been approved and credited to your Primary Credit Balance.`,
       String(withdrawal.user_id)
     ]);
 
@@ -513,7 +513,7 @@ for (const user of users.rows) {
     `,
     [
       "Daily Commission Credited",
-      `₹${commissionAmount} (${commissionRate.toFixed(2)}%) credited to your ${walletType}. You have ${referralCount} referrals.`,
+      `$${commissionAmount} (${commissionRate.toFixed(2)}%) credited to your ${walletType}. You have ${referralCount} referrals.`,
       String(user.id)
     ]
   );
@@ -576,7 +576,7 @@ router.post("/admin/trade-wallet/reject", async (req, res) => {
   VALUES ($1, $2, 'custom', $3)
 `, [
   "Withdrawal Rejected",
-  `Your Strategy Allocation Balance withdrawal of ₹${withdrawal.requested_amount} was rejected. Reason: ${reason}`,
+  `Your Strategy Allocation Balance withdrawal of $${withdrawal.requested_amount} was rejected. Reason: ${reason}`,
   String(withdrawal.user_id)
 ]);
 

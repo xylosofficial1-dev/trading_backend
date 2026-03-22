@@ -551,6 +551,27 @@ router.post("/referrals/set-parent", async (req, res) => {
   }
 });
 
+// routes/userRoutes.js
+router.get("/check-referral/:code", async (req, res) => {
+  const { code } = req.params;
+
+  try {
+    const result = await pool.query(
+      "SELECT id FROM users WHERE referral_code = $1",
+      [code]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ valid: false, message: "Invalid referral code" });
+    }
+
+    res.json({ valid: true });
+  } catch (err) {
+    console.log("Referral check error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 router.post("/online", async (req, res) => {
   try {
     const { user_id, status } = req.body;

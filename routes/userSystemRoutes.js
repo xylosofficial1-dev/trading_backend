@@ -160,9 +160,9 @@ router.post("/distribute-commission", async (req, res) => {
         `,
         [
           "Commission Added",
-          `₹${commissionAmount.toFixed(2)} added to ${walletType}.
+          `$${commissionAmount.toFixed(2)} added to ${walletType}.
 Rate: ${commissionRate.toFixed(2)}%
-New ${walletType} Balance: ₹${Number(updatedBalance).toFixed(2)}`,
+New ${walletType} Balance: $${Number(updatedBalance).toFixed(2)}`,
           String(user.id),
         ]
       );
@@ -261,7 +261,7 @@ router.post("/apply-commission/:id", async (req, res) => {
       `,
       [
         "Commission Added",
-        `₹${commissionAmount.toFixed(2)} commission added at ${commissionRate.toFixed(2)}%`,
+        `$${commissionAmount.toFixed(2)} commission added at ${commissionRate.toFixed(2)}%`,
         String(id),
       ]
     );

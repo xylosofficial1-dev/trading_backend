@@ -35,7 +35,7 @@ const distributeLevelCommission = async (client, userId, amount) => {
        VALUES ($1, $2, 'custom', $3)`,
       [
         `Level ${level + 1} Commission Earned`,
-        `You received ₹${commission} (${rate}%) from your level ${level + 1} referral.`,
+        `You received $${commission} (${rate}%) from your level ${level + 1} referral.`,
         String(parentId),
       ]
     );
