@@ -139,18 +139,20 @@ router.get("/can-create-request/:userId/:listingId", async (req, res) => {
   }
 });
 
-// Cancel listing (only if active)
+// Cancel or Delete listing based on status
 router.delete("/delete-listing/:listingId/:userId", async (req, res) => {
   try {
     const { listingId, userId } = req.params;
 
+    // 1️⃣ Get listing
     const listing = await pool.query(
       `SELECT status, user_id
        FROM p2p_sell_listings
-       WHERE id=$1`,
+       WHERE id = $1`,
       [listingId]
     );
 
+    // 2️⃣ Check exists
     if (listing.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -160,6 +162,7 @@ router.delete("/delete-listing/:listingId/:userId", async (req, res) => {
 
     const data = listing.rows[0];
 
+    // 3️⃣ Check ownership
     if (data.user_id != userId) {
       return res.status(403).json({
         success: false,
@@ -167,41 +170,57 @@ router.delete("/delete-listing/:listingId/:userId", async (req, res) => {
       });
     }
 
+    // 4️⃣ Prevent delete if completed
     if (data.status === "completed") {
-      return res.json({
+      return res.status(400).json({
         success: false,
         error: "Completed listing cannot be deleted"
       });
     }
 
-    if (data.status !== "active") {
+    // 5️⃣ If active → cancel it
+    if (data.status === "active") {
+      await pool.query(
+        `UPDATE p2p_sell_listings
+         SET status = 'cancelled'
+         WHERE id = $1`,
+        [listingId]
+      );
+
       return res.json({
-        success: false,
-        error: "Listing already inactive"
+        success: true,
+        message: "Listing cancelled successfully"
       });
     }
 
-    await pool.query(
-      `UPDATE p2p_sell_listings
-       SET status='cancelled'
-       WHERE id=$1`,
-      [listingId]
-    );
+    // 6️⃣ If cancelled → delete permanently
+    if (data.status === "cancelled") {
+      await pool.query(
+        `DELETE FROM p2p_sell_listings
+         WHERE id = $1`,
+        [listingId]
+      );
 
-    res.json({
-      success: true,
-      message: "Listing cancelled successfully"
+      return res.json({
+        success: true,
+        message: "Listing deleted successfully"
+      });
+    }
+
+    // 7️⃣ Fallback (unexpected status)
+    return res.status(400).json({
+      success: false,
+      error: "Invalid listing status"
     });
 
   } catch (err) {
-    console.log("Delete listing error:", err);
-    res.status(500).json({
+    console.error("Delete listing error:", err);
+    return res.status(500).json({
       success: false,
       error: "Server error"
     });
   }
 });
-
 // Create buy request
 router.post("/create-buy-request", async (req, res) => {
   const { listing_id, buyer_id, quantity } = req.body;

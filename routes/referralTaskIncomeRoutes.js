@@ -184,7 +184,7 @@ LIMIT 10`,
     );
 
    const levels = [
-{ name: "$150 Task", deposit:100, targets:[10,35,85,185], rewards:[75,275,755,1755] },
+{ name: "$100 Task", deposit:100, targets:[10,35,85,185], rewards:[75,275,755,1755] },
 
 { name: "$250 Task", deposit:350, targets:[10,35,85,185], rewards:[300,1000,2700,6500] },
 
