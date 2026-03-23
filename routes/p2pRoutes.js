@@ -704,6 +704,31 @@ router.post("/payment-reject", async (req, res) => {
   }
 });
 
+// ADMIN - Get all buy requests
+router.get("/admin/buy-requests", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        r.*,
+        u1.name as buyer_name,
+        u2.name as seller_name
+      FROM p2p_buy_requests r
+      JOIN users u1 ON u1.id = r.buyer_id
+      JOIN users u2 ON u2.id = r.seller_id
+      ORDER BY r.created_at DESC
+    `);
+
+    res.json({
+      success: true,
+      data: result.rows
+    });
+
+  } catch (err) {
+    console.error("Admin buy requests error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // Get active trade
 router.get("/active-trade/:userId", async (req, res) => {
   try {
