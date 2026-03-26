@@ -139,85 +139,58 @@ router.get("/can-create-request/:userId/:listingId", async (req, res) => {
   }
 });
 
-// Cancel or Delete listing based on status
 router.delete("/delete-listing/:listingId/:userId", async (req, res) => {
   try {
     const { listingId, userId } = req.params;
 
-    // 1️⃣ Get listing
+    // 1️⃣ Check listing exists & ownership
     const listing = await pool.query(
-      `SELECT status, user_id
-       FROM p2p_sell_listings
+      `SELECT status, user_id 
+       FROM p2p_sell_listings 
        WHERE id = $1`,
       [listingId]
     );
 
-    // 2️⃣ Check exists
     if (listing.rows.length === 0) {
       return res.status(404).json({
         success: false,
-        error: "Listing not found"
+        error: "Listing not found",
       });
     }
 
     const data = listing.rows[0];
 
-    // 3️⃣ Check ownership
     if (data.user_id != userId) {
       return res.status(403).json({
         success: false,
-        error: "Unauthorized"
+        error: "Unauthorized",
       });
     }
 
-    // 4️⃣ Prevent delete if completed
+    // 2️⃣ Optional: block completed
     if (data.status === "completed") {
       return res.status(400).json({
         success: false,
-        error: "Completed listing cannot be deleted"
+        error: "Completed listing cannot be deleted",
       });
     }
 
-    // 5️⃣ If active → cancel it
-    if (data.status === "active") {
-      await pool.query(
-        `UPDATE p2p_sell_listings
-         SET status = 'cancelled'
-         WHERE id = $1`,
-        [listingId]
-      );
+    // ✅ 3️⃣ ALWAYS HARD DELETE
+    await pool.query(
+      `DELETE FROM p2p_sell_listings WHERE id = $1`,
+      [listingId]
+    );
 
-      return res.json({
-        success: true,
-        message: "Listing cancelled successfully"
-      });
-    }
-
-    // 6️⃣ If cancelled → delete permanently
-    if (data.status === "cancelled") {
-      await pool.query(
-        `DELETE FROM p2p_sell_listings
-         WHERE id = $1`,
-        [listingId]
-      );
-
-      return res.json({
-        success: true,
-        message: "Listing deleted successfully"
-      });
-    }
-
-    // 7️⃣ Fallback (unexpected status)
-    return res.status(400).json({
-      success: false,
-      error: "Invalid listing status"
+    return res.json({
+      success: true,
+      message: "Listing deleted permanently",
     });
 
   } catch (err) {
     console.error("Delete listing error:", err);
     return res.status(500).json({
       success: false,
-      error: "Server error"
+      error: "Server error",
     });
   }
 });

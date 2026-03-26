@@ -169,7 +169,7 @@ router.post("/approve/:id", async (req, res) => {
        VALUES ($1, $2, 'custom', $3, NOW())`,
       [
         "Withdrawal Approved",
-        `Your withdrawal request of $${reqData.amount} has been approved and processed. Amount deducted from your wallet.`,
+        `Your withdrawal request of $${reqData.amount} has been approved and processed. Amount deducted from your Primary Credit Balance.`,
         reqData.user_id.toString(),
       ]
     );

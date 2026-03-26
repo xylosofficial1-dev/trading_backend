@@ -98,6 +98,8 @@ router.post("/distribute-commission", async (req, res) => {
       }
     }
 
+
+
     /* ===============================
        💰 DISTRIBUTE COMMISSION
     =============================== */
@@ -115,58 +117,136 @@ router.post("/distribute-commission", async (req, res) => {
       GROUP BY u.id
     `);
 
-    for (const user of users.rows) {
-      const referralCount = Number(user.referrals);
-      const commissionRate = getCommissionRate(referralCount);
-      const baseAmount = Number(user.trading_wallet_amount);
+   for (const user of users.rows) {
+  const referralCount = Number(user.referrals);
+  const commissionRate = getCommissionRate(referralCount);
+  const baseAmount = user.trading_wallet_amount;
 
-      if (baseAmount <= 0) continue;
+  if (baseAmount <= 0) continue;
 
-      const commissionAmount = Number(
-        ((baseAmount * commissionRate) / 100).toFixed(2)
-      );
+  const commissionAmount = Number(
+    ((baseAmount * commissionRate) / 100).toFixed(2)
+  );
 
-      let updatedBalance;
-      let walletType;
+  let updatedBalance;
+  let walletType;
 
-      if (user.auto_trade) {
-        const update = await client.query(
-          `UPDATE users 
-           SET trading_wallet_amount = trading_wallet_amount + $1
-           WHERE id = $2
-           RETURNING trading_wallet_amount`,
-          [commissionAmount, user.id]
-        );
+  /* ===============================
+     ✅ 1. SELF COMMISSION
+  =============================== */
+  if (user.auto_trade) {
+    const update = await client.query(
+      `UPDATE users 
+       SET trading_wallet_amount = trading_wallet_amount + $1
+       WHERE id = $2
+       RETURNING trading_wallet_amount`,
+      [commissionAmount, user.id]
+    );
 
-        updatedBalance = update.rows[0].trading_wallet_amount;
-        walletType = "Strategy Allocation Balance";
-      } else {
-        const update = await client.query(
-          `UPDATE users 
-           SET wallet_amount = wallet_amount + $1
-           WHERE id = $2
-           RETURNING wallet_amount`,
-          [commissionAmount, user.id]
-        );
+    updatedBalance = update.rows[0].trading_wallet_amount;
+    walletType = "Strategy Allocation Balance";
+  } else {
+    const update = await client.query(
+      `UPDATE users 
+       SET wallet_amount = wallet_amount + $1
+       WHERE id = $2
+       RETURNING wallet_amount`,
+      [commissionAmount, user.id]
+    );
 
-        updatedBalance = update.rows[0].wallet_amount;
-        walletType = "Primary Credit Balance";
-      }
+    updatedBalance = update.rows[0].wallet_amount;
+    walletType = "Primary Credit Balance";
+  }
 
-      await client.query(
-        `
-        INSERT INTO notifications (title, message, target_type, target_users)
-        VALUES ($1, $2, 'custom', $3)
-        `,
-        [
-          "Commission Added",
-          `$${commissionAmount.toFixed(2)} added to ${walletType}.
-Rate: ${commissionRate.toFixed(2)}%
-New ${walletType} Balance: $${Number(updatedBalance).toFixed(2)}`,
-          String(user.id),
-        ]
-      );
-    }
+  /* ===============================
+     🔔 SELF NOTIFICATION
+  =============================== */
+  await client.query(
+    `INSERT INTO notifications 
+     (title, message, target_type, target_users, main_wallet_balance, trading_wallet_balance)
+     VALUES ($1, $2, 'custom', $3, $4, $5)`,
+    [
+      "Commission Added",
+      `$${commissionAmount} added to ${walletType}`,
+      String(user.id),
+      user.auto_trade ? null : updatedBalance,
+      user.auto_trade ? updatedBalance : null
+    ]
+  );
+
+const levels = [
+  { percent: 5 },
+  { percent: 2.5 },
+  { percent: 1.25 },
+  { percent: 0.75 },
+  { percent: 0.37 },
+];
+
+let currentUserId = user.id;
+const visited = new Set();
+
+for (let i = 0; i < levels.length; i++) {
+  // 🔒 loop safety
+  if (visited.has(currentUserId)) break;
+  visited.add(currentUserId);
+
+  // 👉 get parent_id only
+  const res = await client.query(
+    `SELECT parent_id FROM users WHERE id = $1`,
+    [currentUserId]
+  );
+
+  if (!res.rowCount || !res.rows[0].parent_id) break;
+
+  const parentId = res.rows[0].parent_id;
+
+  // 👉 get parent data
+  const parentRes = await client.query(
+    `SELECT id, wallet_amount FROM users WHERE id = $1`,
+    [parentId]
+  );
+
+  if (!parentRes.rowCount) break;
+
+  const parent = parentRes.rows[0];
+
+  const reward = Number(
+    ((commissionAmount * levels[i].percent) / 100).toFixed(2)
+  );
+
+  if (reward <= 0) {
+    currentUserId = parent.id;
+    continue;
+  }
+
+  // ✅ update parent wallet
+  const updateParent = await client.query(
+    `UPDATE users 
+     SET wallet_amount = wallet_amount + $1
+     WHERE id = $2
+     RETURNING wallet_amount`,
+    [reward, parent.id]
+  );
+
+  const parentBalance = updateParent.rows[0].wallet_amount;
+
+  // 🔔 notification
+  await client.query(
+    `INSERT INTO notifications 
+     (title, message, target_type, target_users, main_wallet_balance)
+     VALUES ($1, $2, 'custom', $3, $4)`,
+
+    [
+      "Referral Commission",
+      `You earned $${reward} from level ${i + 1} referral`,
+      String(parent.id),
+      parentBalance,
+    ]
+  );
+
+  currentUserId = parent.id;
+}
+}
 
     /* ===============================
        📝 SAVE LAST RUN TIME

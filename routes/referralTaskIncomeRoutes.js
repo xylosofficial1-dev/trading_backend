@@ -30,103 +30,136 @@ const rewardRules = [
 ];
 
 router.get("/check-rewards/:parentId", async (req, res) => {
+  const { parentId } = req.params;
 
-const { parentId } = req.params;
+  try {
+    const availableRewards = [];
 
-try {
+    for (const rule of rewardRules) {
 
-const rewardsEarned = [];
+      // already claimed?
+      const exist = await pool.query(
+        `
+        SELECT id FROM referral_fund_rewards
+        WHERE parent_id = $1
+        AND fund_level = $2
+        AND referral_target = $3
+        `,
+        [parentId, rule.deposit, rule.referrals]
+      );
 
-for (const rule of rewardRules) {
+      if (exist.rows.length > 0) continue;
 
-const exist = await pool.query(
-`
-SELECT id FROM referral_fund_rewards
-WHERE parent_id = $1
-AND fund_level = $2
-AND referral_target = $3
-`,
-[parentId, rule.deposit, rule.referrals]
-);
+      // count eligible referrals
+      const refs = await pool.query(
+        `
+        SELECT COUNT(*) 
+        FROM users
+        WHERE parent_id = $1
+        AND trading_wallet_amount >= $2
+        `,
+        [parentId, rule.deposit]
+      );
 
-if (exist.rows.length > 0) continue;
+      const count = Number(refs.rows[0].count);
 
-const refs = await pool.query(
-`
-SELECT COUNT(*) 
-FROM users
-WHERE parent_id = $1
-AND trading_wallet_amount >= $2
-`,
-[parentId, rule.deposit]
-);
+      if (count >= rule.referrals) {
+        availableRewards.push(rule);
+      }
+    }
 
-const count = Number(refs.rows[0].count);
+    res.json({
+      success: true,
+      availableRewards
+    });
 
-if (count >= rule.referrals) {
-
-await pool.query("BEGIN");
-
-await pool.query(
-`
-UPDATE users
-SET wallet_amount = wallet_amount + $1
-WHERE id = $2
-`,
-[rule.reward, parentId]
-);
-
-await pool.query(
-`
-INSERT INTO referral_fund_rewards
-(parent_id, fund_level, referral_target, reward_amount)
-VALUES ($1,$2,$3,$4)
-`,
-[parentId, rule.deposit, rule.referrals, rule.reward]
-);
-await pool.query(
-`
-INSERT INTO referral_fund_rewards
-(parent_id, fund_level, referral_target, reward_amount)
-VALUES ($1,$2,$3,$4)
-`,
-[parentId, rule.deposit, rule.referrals, rule.reward]
-);
-
-await pool.query(
-`
-INSERT INTO notifications
-(title,message,target_type,target_users)
-VALUES ($1,$2,'custom',$3)
-`,
-[
-"Referral Reward Earned",
-`You earned $${rule.reward} for completing ${rule.referrals} referrals with $${rule.deposit} deposits.`,
-String(parentId)
-]
-);
-
-await pool.query("COMMIT");
-
-rewardsEarned.push(rule);
-
-}
-
-}
-
-res.json({
-success:true,
-rewardsEarned
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "server error" });
+  }
 });
 
-} catch (err) {
+router.post("/claim", async (req, res) => {
+  try {
+    const { userId, deposit, referralTarget, rewardAmount } = req.body;
 
-await pool.query("ROLLBACK");
-console.error(err);
+    // check eligible referrals
+    const refs = await pool.query(
+      `
+      SELECT COUNT(*) 
+      FROM users
+      WHERE parent_id = $1
+      AND trading_wallet_amount >= $2
+      `,
+      [userId, deposit]
+    );
 
-res.status(500).json({error:"server error"});
-}
+    const count = Number(refs.rows[0].count);
 
+    if (count < referralTarget) {
+      return res.status(400).json({ error: "Not eligible" });
+    }
+
+    // check already claimed
+    const exist = await pool.query(
+      `
+      SELECT id FROM referral_fund_rewards
+      WHERE parent_id=$1
+      AND fund_level=$2
+      AND referral_target=$3
+      `,
+      [userId, deposit, referralTarget]
+    );
+
+    if (exist.rows.length > 0) {
+      return res.status(400).json({ error: "Already claimed" });
+    }
+
+    await pool.query("BEGIN");
+
+    // 💰 add money
+    await pool.query(
+      `
+      UPDATE users
+      SET wallet_amount = wallet_amount + $1
+      WHERE id=$2
+      `,
+      [rewardAmount, userId]
+    );
+
+    // save claim
+    await pool.query(
+      `
+      INSERT INTO referral_fund_rewards
+      (parent_id, fund_level, referral_target, reward_amount)
+      VALUES ($1,$2,$3,$4)
+      `,
+      [userId, deposit, referralTarget, rewardAmount]
+    );
+
+    // notification
+    await pool.query(
+      `
+      INSERT INTO notifications
+      (title,message,target_type,target_users)
+      VALUES ($1,$2,'custom',$3)
+      `,
+      [
+        "Reward Claimed",
+        `You claimed $${rewardAmount}`,
+        String(userId)
+      ]
+    );
+
+    await pool.query("COMMIT");
+
+    res.json({ success: true });
+
+  } catch (err) {
+    await pool.query("ROLLBACK");
+    console.error(err);
+    res.status(500).json({ error: "server error" });
+  }
 });
 
 // Get dashboard data
@@ -262,9 +295,6 @@ WHERE id=$2
 [amount,userId]
 );
 
-// check rewards
-await checkReferralFundReward(userId);
-
 res.json({message:"Deposit added"});
 
 });
@@ -316,34 +346,37 @@ router.get("/test/:userId", async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-
+ 
 router.get("/fake/:parentId", async (req, res) => {
   try {
-
     const parentId = Number(req.params.parentId);
 
-    // 1️⃣ create fake user
-    const fakeUser = await pool.query(
-      `
-      INSERT INTO users
-      (name, phone, email, password_hash, referral_code, parent_id, trading_wallet_amount)
-      VALUES (
-        'Test User',
-        CONCAT('999', FLOOR(RANDOM()*1000000)),
-        CONCAT('test', FLOOR(RANDOM()*1000000), '@mail.com'),
-        'test',
-        CONCAT('REF', FLOOR(RANDOM()*100000)),
-        $1,
-        350
-      )
-      RETURNING id
-      `,
-      [parentId]
-    );
+    const totalToCreate = 100;
+    const createdUsers = [];
 
-    const newUserId = fakeUser.rows[0].id;
+    for (let i = 0; i < totalToCreate; i++) {
+      const fakeUser = await pool.query(
+        `
+        INSERT INTO users
+        (name, phone, email, password_hash, referral_code, parent_id, trading_wallet_amount)
+        VALUES (
+          'Test User',
+          CONCAT('999', FLOOR(RANDOM()*1000000)),
+          CONCAT('test', FLOOR(RANDOM()*1000000), '@mail.com'),
+          'test',
+          CONCAT('REF', FLOOR(RANDOM()*100000)),
+          $1,
+          350
+        )
+        RETURNING id
+        `,
+        [parentId]
+      );
 
-    // 2️⃣ count eligible referrals
+      createdUsers.push(fakeUser.rows[0].id);
+    }
+
+    // ✅ count eligible referrals
     const countResult = await pool.query(
       `
       SELECT COUNT(*) AS total
@@ -356,7 +389,7 @@ router.get("/fake/:parentId", async (req, res) => {
 
     const eligible = Number(countResult.rows[0].total);
 
-    // 3️⃣ reward tiers
+    // ✅ tiers
     const tiers = [
       { referrals: 10, reward: 300 },
       { referrals: 35, reward: 1000 },
@@ -367,49 +400,18 @@ router.get("/fake/:parentId", async (req, res) => {
     const rewardsCredited = [];
 
     for (let tier of tiers) {
-
       if (eligible >= tier.referrals) {
 
         const exist = await pool.query(
           `
           SELECT id FROM referral_fund_rewards
-WHERE parent_id=$1
-AND referral_target=$2
+          WHERE parent_id=$1
+          AND referral_target=$2
           `,
           [parentId, tier.referrals]
         );
 
         if (exist.rows.length === 0) {
-
-          await pool.query(
-            `
-           UPDATE users
-SET wallet_amount = wallet_amount + $1
-WHERE id=$2
-            `,
-            [tier.reward, parentId]
-          );
-
-          await pool.query(
-            `
-            INSERT INTO referral_fund_rewards
-(parent_id, fund_level, referral_target, reward_amount)
-VALUES ($1,$2,$3,$4)
-            `,
-            [parentId, 350, tier.referrals, tier.reward]
-          );
-          await pool.query(
-` 
-INSERT INTO notifications
-(title,message,target_type,target_users)
-VALUES ($1,$2,'custom',$3)
-`,
-[
-"Referral Reward Earned",
-`You earned $${tier.reward} referral reward.`,
-String(parentId)
-]
-);
 
           rewardsCredited.push(tier);
         }
@@ -417,8 +419,8 @@ String(parentId)
     }
 
     res.json({
-      message: "Fake referral created",
-      newReferralId: newUserId,
+      message: `${totalToCreate} fake referrals created`,
+      totalCreated: createdUsers.length,
       eligibleReferrals: eligible,
       rewardsCredited
     });
