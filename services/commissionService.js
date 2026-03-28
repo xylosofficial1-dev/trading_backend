@@ -33,12 +33,13 @@ const distributeLevelCommission = async (client, userId, amount) => {
       ? "trading_wallet_amount"
       : "wallet_amount";
 
-    await client.query(
-      `UPDATE users
-       SET ${column} = ${column} + $1
-       WHERE id = $2`,
-      [commission, parentId]
-    );
+  // ✅ Level commission always goes to Primary Wallet
+await client.query(
+  `UPDATE users
+   SET wallet_amount = wallet_amount + $1
+   WHERE id = $2`,
+  [commission, parentId]
+);
 
     // 🔔 Notification
     const walletName = autoTrade

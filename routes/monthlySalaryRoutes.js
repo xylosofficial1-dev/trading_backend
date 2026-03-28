@@ -117,7 +117,7 @@ router.post("/claim/:userId", async (req, res) => {
        VALUES ($1, $2, $3, $4)`,
       [
         "Monthly Reward Claimed 🎉",
-        `🔥 $${payout} credited to your wallet!`,
+        `🔥 $${payout} credited to your Primary Credit Balance!`,
         "custom",
         userId.toString()
       ]
