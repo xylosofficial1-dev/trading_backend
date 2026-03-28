@@ -7,13 +7,12 @@ const getDirectBusiness = require("../utils/directBusinessCalculator");
 const { getSalary, rules } = require("../utils/monthlySalaryRules");
 
 router.post("/claim/:userId", async (req, res) => {
-
   const { userId } = req.params;
 
   try {
-
     const business = await getDirectBusiness(userId);
 
+    // 🔹 Get last claim
     const lastClaim = await pool.query(
       `SELECT business_level, claimed_at
        FROM monthly_salary_claims
@@ -26,88 +25,121 @@ router.post("/claim/:userId", async (req, res) => {
     let lastLevel = 0;
 
     if (lastClaim.rowCount > 0) {
+  lastLevel = Number(lastClaim.rows[0].business_level);
 
-      lastLevel = Number(lastClaim.rows[0].business_level);
+  const lastDate = new Date(lastClaim.rows[0].claimed_at);
+  const nextDate = new Date(lastDate);
+  nextDate.setDate(nextDate.getDate() + 30);
 
-      const lastDate = new Date(lastClaim.rows[0].claimed_at);
-      const nextDate = new Date(lastDate);
-      nextDate.setDate(nextDate.getDate() + 30);
+  const now = new Date();
 
-      if (new Date() < nextDate) {
+  // 🔥 Get current level
+  const current = rules.filter(r => business >= r.business).pop();
 
-        const remaining = Math.ceil(
-          (nextDate - new Date()) / (1000 * 60 * 60 * 24)
-        );
-
-        return res.json({
-          success: false,
-          canClaim: false,
-          message: "Claim not available yet",
-          remainingDays: remaining
-        });
-
-      }
-
-    }
-
-    // eligible levels not yet claimed
-    const eligible = rules.filter(
-      r => business >= r.business && r.business > lastLevel
+  // ✅ CONDITION 1: Level upgraded → allow claim instantly
+  if (current && current.business > lastLevel) {
+    // allow claim (skip 30 days)
+  }
+  // ❌ CONDITION 2: No level upgrade → enforce 30 days
+  else if (now < nextDate) {
+    const remaining = Math.ceil(
+      (nextDate - now) / (1000 * 60 * 60 * 24)
     );
 
-    if (eligible.length === 0) {
+    return res.json({
+      success: false,
+      canClaim: false,
+      message: "Claim not available yet",
+      remainingDays: remaining
+    });
+  }
+}
+
+    // 🔹 Get current level based on business
+    const current = rules.filter(r => business >= r.business).pop();
+
+    if (!current) {
       return res.json({
         success: false,
-        message: "No new salary level reached"
+        message: "No salary level reached"
       });
     }
 
-    const totalSalary = eligible.reduce(
+    // 🔥 CORE FIXED LOGIC
+    const allEligibleLevels = rules.filter(r => business >= r.business);
+
+    let payoutLevels;
+
+    if (lastLevel === 0) {
+      // ✅ First claim → give ALL pending levels
+      payoutLevels = allEligibleLevels;
+    } else {
+      // ✅ Only give levels NOT yet claimed
+      payoutLevels = allEligibleLevels.filter(
+        r => r.business > lastLevel
+      );
+    }
+
+    if (payoutLevels.length === 0) {
+      return res.json({
+        success: false,
+        message: "Nothing new to claim"
+      });
+    }
+
+    // ✅ Calculate payout
+    const payout = payoutLevels.reduce(
       (sum, r) => sum + r.salary,
       0
     );
 
-    const highestLevel = eligible[eligible.length - 1].business;
+    const highestLevel = current.business;
 
+    // ✅ Update wallet
     await pool.query(
       `UPDATE users
        SET wallet_amount = wallet_amount + $1
        WHERE id=$2`,
-      [totalSalary, userId]
+      [payout, userId]
     );
 
+    // ✅ Insert claim history
     await pool.query(
       `INSERT INTO monthly_salary_claims
        (user_id, salary_amount, business_level)
        VALUES ($1,$2,$3)`,
-      [userId, totalSalary, highestLevel]
+      [userId, payout, highestLevel]
     );
 
-    res.json({
+    // ✅ Notification
+    await pool.query(
+      `INSERT INTO notifications (title, message, target_type, target_users)
+       VALUES ($1, $2, $3, $4)`,
+      [
+        "Monthly Reward Claimed 🎉",
+        `🔥 $${payout} credited to your wallet!`,
+        "custom",
+        userId.toString()
+      ]
+    );
+
+    return res.json({
       success: true,
-      salary: totalSalary
+      salary: payout
     });
 
   } catch (err) {
-
     console.error(err);
-
     res.status(500).json({
       error: "Server error"
     });
-
   }
-
 });
  
 router.get("/dashboard/:userId", async (req, res) => {
-
   const { userId } = req.params;
-
   try {
-
     const business = await getDirectBusiness(userId);
-
     const lastClaim = await pool.query(
       `SELECT business_level, claimed_at
        FROM monthly_salary_claims
@@ -128,14 +160,22 @@ router.get("/dashboard/:userId", async (req, res) => {
       nextClaimDate.setDate(nextClaimDate.getDate() + 30);
     }
 
-    const eligible = rules.filter(
-      r => business >= r.business && r.business > lastLevel
-    );
+   const allEligibleLevels = rules.filter(r => business >= r.business);
 
-    const claimableAmount = eligible.reduce(
-      (sum, r) => sum + r.salary,
-      0
-    );
+let claimableLevels;
+
+if (lastLevel === 0) {
+  claimableLevels = allEligibleLevels;
+} else {
+  claimableLevels = allEligibleLevels.filter(
+    r => r.business > lastLevel
+  );
+}
+
+const claimableAmount = claimableLevels.reduce(
+  (sum, r) => sum + r.salary,
+  0
+);
 
     const history = await pool.query(`
       SELECT *
@@ -162,11 +202,11 @@ router.get("/status/:userId", async (req, res) => {
   const { userId } = req.params;
 
   try {
-
     const business = await getDirectBusiness(userId);
-    const { salary } = getSalary(business);
 
-    if (salary === 0) {
+    const current = rules.filter(r => business >= r.business).pop();
+
+    if (!current) {
       return res.json({
         canClaim: false,
         remainingTime: "Build $1000 direct business"
@@ -174,17 +214,15 @@ router.get("/status/:userId", async (req, res) => {
     }
 
     const lastClaim = await pool.query(
-      `
-      SELECT claimed_at
-      FROM monthly_salary_claims
-      WHERE user_id=$1
-      ORDER BY claimed_at DESC
-      LIMIT 1
-      `,
+      `SELECT business_level, claimed_at
+       FROM monthly_salary_claims
+       WHERE user_id=$1
+       ORDER BY claimed_at DESC
+       LIMIT 1`,
       [userId]
     );
 
-    // First claim available immediately
+    // ✅ First claim
     if (lastClaim.rowCount === 0) {
       return res.json({
         canClaim: true,
@@ -192,12 +230,23 @@ router.get("/status/:userId", async (req, res) => {
       });
     }
 
+    const lastLevel = Number(lastClaim.rows[0].business_level);
     const lastDate = new Date(lastClaim.rows[0].claimed_at);
+
     const nextDate = new Date(lastDate);
     nextDate.setDate(nextDate.getDate() + 30);
 
     const now = new Date();
 
+    // 🔥 KEY FIX: Allow claim if level increased
+    if (current.business > lastLevel) {
+      return res.json({
+        canClaim: true,
+        remainingTime: ""
+      });
+    }
+
+    // ⛔ Otherwise apply 30-day rule
     if (now >= nextDate) {
       return res.json({
         canClaim: true,
@@ -206,10 +255,9 @@ router.get("/status/:userId", async (req, res) => {
     }
 
     const diff = nextDate - now;
-
     const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
 
-    res.json({
+    return res.json({
       canClaim: false,
       remainingTime: `${days} days`
     });
