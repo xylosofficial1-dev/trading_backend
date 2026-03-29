@@ -8,6 +8,12 @@ function getCommissionRate(referralCount) {
   return base + referralCount * increment;
 }
 
+const precise = (num) => Number(num.toString());
+
+const multiply = (a, b) => precise(a * b);
+
+const divide = (a, b) => precise(a / b);
+
 /* =========================================================
    REFERRAL COUNT
    GET /api/system/referrals/:id/count
@@ -124,9 +130,10 @@ router.post("/distribute-commission", async (req, res) => {
 
   if (baseAmount <= 0) continue;
 
-  const commissionAmount = Number(
-    ((baseAmount * commissionRate) / 100).toFixed(2)
-  );
+const commissionAmount = divide(
+  multiply(baseAmount, commissionRate),
+  100
+);
 
   let updatedBalance;
   let walletType;
@@ -210,9 +217,10 @@ for (let i = 0; i < levels.length; i++) {
 
   const parent = parentRes.rows[0];
 
-  const reward = Number(
-    ((commissionAmount * levels[i].percent) / 100).toFixed(2)
-  );
+ const reward = divide(
+  multiply(commissionAmount, levels[i].percent),
+  100
+);
 
   if (reward <= 0) {
     currentUserId = parent.id;
@@ -315,7 +323,10 @@ router.post("/apply-commission/:id", async (req, res) => {
       return res.json({ message: "No balance for commission" });
     }
 
-    const commissionAmount = (baseAmount * commissionRate) / 100;
+    const commissionAmount = divide(
+  multiply(baseAmount, commissionRate),
+  100
+);
 
    if (user.auto_trade) {
   await client.query(
@@ -341,7 +352,7 @@ router.post("/apply-commission/:id", async (req, res) => {
       `,
       [
         "Commission Added",
-        `$${commissionAmount.toFixed(2)} commission added at ${commissionRate.toFixed(2)}%`,
+        `$${commissionAmount} commission added at ${commissionRate.toFixed(2)}%`,
         String(id),
       ]
     );

@@ -15,6 +15,11 @@ const startCommissionCycle = async (client, userId) => {
     [userId]
   );
 };
+const precise = (num) => Number(num.toString());
+
+const multiply = (a, b) => precise(a * b);
+
+const divide = (a, b) => precise(a / b);
 
 router.post("/send", async (req, res) => {
   const { senderId, recipientAddress, amount } = req.body;
@@ -480,9 +485,10 @@ for (const user of users.rows) {
   // 🔥 Dynamic Rate
   const commissionRate = 1.6 + (referralCount * 0.05);
 
-  const commissionAmount = Number(
-    ((tradingBalance * commissionRate) / 100).toFixed(2)
-  );
+  const commissionAmount = divide(
+  multiply(tradingBalance, commissionRate),
+  100
+);
 
   let walletType = "";
 
@@ -513,7 +519,7 @@ for (const user of users.rows) {
     `,
     [
       "Daily Commission Credited",
-      `$${commissionAmount} (${commissionRate.toFixed(2)}%) credited to your ${walletType}. You have ${referralCount} referrals.`,
+      `$${commissionAmount} (${commissionRate}%) credited to your ${walletType}. You have ${referralCount} referrals.`,
       String(user.id)
     ]
   );
