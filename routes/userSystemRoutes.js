@@ -126,7 +126,7 @@ router.post("/distribute-commission", async (req, res) => {
   const commissionRate = getCommissionRate(referralCount);
   const baseAmount = user.trading_wallet_amount;
 
-  if (baseAmount <= 0) continue;
+  const isEligibleForSelf = baseAmount >= 100;
 
 const commissionAmount = divide(
   multiply(baseAmount, commissionRate),
@@ -139,6 +139,7 @@ const commissionAmount = divide(
   /* ===============================
      ✅ 1. SELF COMMISSION
   =============================== */
+ if (isEligibleForSelf) {
   if (user.auto_trade) {
     const update = await client.query(
       `UPDATE users 
@@ -163,9 +164,7 @@ const commissionAmount = divide(
     walletType = "Primary Credit Balance";
   }
 
-  /* ===============================
-     🔔 SELF NOTIFICATION
-  =============================== */
+  // notification
   await client.query(
     `INSERT INTO notifications 
      (title, message, target_type, target_users, main_wallet_balance, trading_wallet_balance)
@@ -178,7 +177,9 @@ const commissionAmount = divide(
       user.auto_trade ? updatedBalance : null
     ]
   );
-if (user.auto_trade && commissionAmount > 0) {
+}
+
+if (user.auto_trade && isEligibleForSelf && commissionAmount > 0) {
 
   const levels = [
     { percent: 5 },
