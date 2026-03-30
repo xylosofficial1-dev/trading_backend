@@ -67,7 +67,7 @@ router.get("/trade-limit/:id", async (req, res) => {
     console.error("TRADE LIMIT ERROR:", err);
     res.status(500).json({ error: "Failed to calculate limit" });
   }
-});
+}); 
 
 /* =========================================================
    DISTRIBUTE COMMISSION (ADMIN)
@@ -103,8 +103,6 @@ router.post("/distribute-commission", async (req, res) => {
         });
       }
     }
-
-
 
     /* ===============================
        💰 DISTRIBUTE COMMISSION
@@ -181,82 +179,79 @@ const commissionAmount = divide(
     ]
   );
 
-const levels = [
-  { percent: 5 },
-  { percent: 2.5 },
-  { percent: 1.25 },
-  { percent: 0.75 },
-  { percent: 0.37 },
-];
+if (user.auto_trade) {
 
-let currentUserId = user.id;
-const visited = new Set();
+  const levels = [
+    { percent: 5 },
+    { percent: 2.5 },
+    { percent: 1.25 },
+    { percent: 0.75 },
+    { percent: 0.37 },
+  ];
 
-for (let i = 0; i < levels.length; i++) {
-  // 🔒 loop safety
-  if (visited.has(currentUserId)) break;
-  visited.add(currentUserId);
+  let currentUserId = user.id;
+  const visited = new Set();
 
-  // 👉 get parent_id only
-  const res = await client.query(
-    `SELECT parent_id FROM users WHERE id = $1`,
-    [currentUserId]
-  );
+  for (let i = 0; i < levels.length; i++) {
+    if (visited.has(currentUserId)) break;
+    visited.add(currentUserId);
 
-  if (!res.rowCount || !res.rows[0].parent_id) break;
+    const res = await client.query(
+      `SELECT parent_id FROM users WHERE id = $1`,
+      [currentUserId]
+    );
 
-  const parentId = res.rows[0].parent_id;
+    if (!res.rowCount || !res.rows[0].parent_id) break;
 
-  // 👉 get parent data
-  const parentRes = await client.query(
-    `SELECT id, wallet_amount FROM users WHERE id = $1`,
-    [parentId]
-  );
+    const parentId = res.rows[0].parent_id;
 
-  if (!parentRes.rowCount) break;
+    const parentRes = await client.query(
+      `SELECT id, wallet_amount FROM users WHERE id = $1`,
+      [parentId]
+    );
 
-  const parent = parentRes.rows[0];
+    if (!parentRes.rowCount) break;
 
- const reward = divide(
-  multiply(commissionAmount, levels[i].percent),
-  100
+    const parent = parentRes.rows[0];
+
+    const reward = divide(
+      multiply(commissionAmount, levels[i].percent),
+      100
+    );
+
+    if (reward <= 0) {
+      currentUserId = parent.id;
+      continue;
+    }
+
+  const updateParent = await client.query(
+  `UPDATE users 
+   SET wallet_amount = wallet_amount + $1
+   WHERE id = $2
+   RETURNING wallet_amount`,
+  [reward, parent.id]
 );
 
-  if (reward <= 0) {
+const parentBalance = updateParent.rows[0].wallet_amount;
+
+await client.query(
+  `INSERT INTO notifications 
+   (title, message, target_type, target_users, main_wallet_balance)
+   VALUES ($1, $2, 'custom', $3, $4)`,
+  [
+    "Referral Commission",
+    `You earned $${reward} from level ${i + 1} referral`,
+    String(parent.id),
+    parentBalance
+  ]
+);
+
     currentUserId = parent.id;
-    continue;
   }
-
-  // ✅ update parent wallet
-  const updateParent = await client.query(
-    `UPDATE users 
-     SET wallet_amount = wallet_amount + $1
-     WHERE id = $2
-     RETURNING wallet_amount`,
-    [reward, parent.id]
-  );
-
-  const parentBalance = updateParent.rows[0].wallet_amount;
-
-  // 🔔 notification
-  await client.query(
-    `INSERT INTO notifications 
-     (title, message, target_type, target_users, main_wallet_balance)
-     VALUES ($1, $2, 'custom', $3, $4)`,
-
-    [
-      "Referral Commission",
-      `You earned $${reward} from level ${i + 1} referral`,
-      String(parent.id),
-      parentBalance,
-    ]
-  );
-
-  currentUserId = parent.id;
-}
 }
 
-    /* ===============================
+  } 
+      /* ===============================
        📝 SAVE LAST RUN TIME
     =============================== */
     await client.query(
@@ -270,14 +265,14 @@ for (let i = 0; i < levels.length; i++) {
       message: "Commission distributed successfully",
       users: users.rowCount,
     });
-
-  } catch (err) {
+   } catch (err) {
     await client.query("ROLLBACK");
     console.error("COMMISSION ERROR:", err);
     res.status(500).json({ error: "Commission distribution failed" });
   } finally {
     client.release();
   }
+  
 });
 
 /* =========================================================

@@ -11,7 +11,7 @@ const startCommissionCycle = async (client, userId) => {
     INSERT INTO trade_commission_cycles (user_id, started_at, last_paid_at)
     VALUES ($1, NOW(), NULL)
     ON CONFLICT (user_id) DO NOTHING
-    `,
+    `, 
     [userId]
   );
 };

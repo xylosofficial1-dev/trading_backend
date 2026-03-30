@@ -86,7 +86,7 @@ app.use("/api/referral-task", require("./routes/referralTaskIncomeRoutes"));
 app.use("/api/test", require("./routes/testRoutes"));
 app.use("/api/monthly-salary", require("./routes/monthlySalaryRoutes"));
 app.use("/api/admin-income", require("./routes/adminIncomeRoutes"));
-
+ 
 // Check expired trades every minute
 setInterval(() => {
   checkExpiredTrades(io, onlineUsers);
