@@ -16,3 +16,9 @@ SELECT
     auto_trade
 FROM users
 WHERE id IN (12, 17, 18, 19, 20, 21);
+
+DELETE FROM commission_runs;
+
+DELETE FROM notifications
+WHERE DATE(created_at) IN ('2026-03-29', '2026-03-30');
+

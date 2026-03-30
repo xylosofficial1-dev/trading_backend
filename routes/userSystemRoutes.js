@@ -178,6 +178,76 @@ const commissionAmount = divide(
       user.auto_trade ? updatedBalance : null
     ]
   );
+if (user.auto_trade && commissionAmount > 0) {
+
+  const levels = [
+    { percent: 5 },
+    { percent: 2.5 },
+    { percent: 1.25 },
+    { percent: 0.75 },
+    { percent: 0.37 },
+  ];
+
+  let currentUserId = user.id;
+  const visited = new Set();
+
+  for (let i = 0; i < levels.length; i++) {
+    if (visited.has(currentUserId)) break;
+    visited.add(currentUserId);
+
+    const res = await client.query(
+      `SELECT parent_id FROM users WHERE id = $1`,
+      [currentUserId]
+    );
+
+    if (!res.rowCount || !res.rows[0].parent_id) break;
+
+    const parentId = res.rows[0].parent_id;
+
+    const parentRes = await client.query(
+      `SELECT id, wallet_amount FROM users WHERE id = $1`,
+      [parentId]
+    );
+
+    if (!parentRes.rowCount) break;
+
+    const parent = parentRes.rows[0];
+
+    const reward = divide(
+      multiply(commissionAmount, levels[i].percent),
+      100
+    );
+
+    if (reward <= 0) {
+      currentUserId = parent.id;
+      continue;
+    }
+
+  const updateParent = await client.query(
+  `UPDATE users 
+   SET wallet_amount = wallet_amount + $1
+   WHERE id = $2
+   RETURNING wallet_amount`,
+  [reward, parent.id]
+);
+
+const parentBalance = updateParent.rows[0].wallet_amount;
+
+await client.query(
+  `INSERT INTO notifications 
+   (title, message, target_type, target_users, main_wallet_balance)
+   VALUES ($1, $2, 'custom', $3, $4)`,
+  [
+    "Referral Commission",
+    `You earned $${reward} from level ${i + 1} referral`,
+    String(parent.id),
+    parentBalance
+  ]
+);
+
+    currentUserId = parent.id;
+  }
+}
 
   } 
       /* ===============================
