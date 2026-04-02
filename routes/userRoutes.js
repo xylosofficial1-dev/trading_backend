@@ -384,7 +384,7 @@ router.post("/wallet/send", async (req, res) => {
     res.status(500).json({ error: "Wallet transfer failed" });
   }
 });
-
+ 
 /* =========================================
    CHECK COMMISSION LOCK
    GET /api/system/commission-status
@@ -485,6 +485,29 @@ router.get("/referrals/:id/count", async (req, res) => {
   );
 
   res.json({ total: result.rows[0].count });
+});
+
+router.get("/referrals/:id/qualified-count", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query(
+      `SELECT COUNT(*) 
+       FROM users 
+       WHERE parent_id = $1
+       AND trading_wallet_amount >= 100
+       AND status = 'ok'`,
+      [id]
+    );
+
+    res.json({
+      total: Number(result.rows[0].count),
+    });
+
+  } catch (err) {
+    console.error("QUALIFIED REFERRAL ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch qualified referrals" });
+  }
 });
 
 router.get("/referrals/:id/tree", async (req, res) => {
