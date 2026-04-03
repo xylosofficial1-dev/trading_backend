@@ -485,7 +485,7 @@ router.get("/referrals/:id/count", async (req, res) => {
   );
 
   res.json({ total: result.rows[0].count });
-});
+}); 
 
 router.get("/referrals/:id/qualified-count", async (req, res) => {
   const { id } = req.params;

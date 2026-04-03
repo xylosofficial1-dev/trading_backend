@@ -152,8 +152,8 @@ router.post("/close/:id", async (req, res) => {
   } finally {
     client.release();
   }
-});
-
+}); 
+ 
 router.get("/closed/:userId", async (req, res) => {
   try {
     const { rows } = await pool.query(

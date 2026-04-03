@@ -68,7 +68,7 @@ router.get("/trade-limit/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to calculate limit" });
   }
 }); 
-
+ 
 /* =========================================================
    DISTRIBUTE COMMISSION (ADMIN)
    POST /api/system/distribute-commission
@@ -114,7 +114,10 @@ router.post("/distribute-commission", async (req, res) => {
         u.auto_trade,
         u.wallet_amount,
         u.trading_wallet_amount,
-        COUNT(r.id) AS referrals
+       COUNT(r.id) FILTER (
+  WHERE r.trading_wallet_amount >= 100
+  AND r.status = 'ok'
+) AS referrals
       FROM users u
       LEFT JOIN users r ON r.parent_id = u.id
       WHERE u.status = 'ok'
