@@ -491,17 +491,28 @@ router.get("/referrals/:id/qualified-count", async (req, res) => {
   const { id } = req.params;
 
   try {
+    // 🔍 Get all children
     const result = await pool.query(
-      `SELECT COUNT(*) 
+      `SELECT id, trading_wallet_amount, status
        FROM users 
-       WHERE parent_id = $1
-       AND trading_wallet_amount >= 100
-       AND status = 'ok'`,
+       WHERE parent_id = $1`,
       [id]
     );
 
+    console.log("USER ID:", id);
+    console.log("ALL CHILDREN:", result.rows);
+
+    // ✅ Apply your logic manually
+    const qualified = result.rows.filter(
+      u => Number(u.trading_wallet_amount) >= 100 && u.status === "ok"
+    );
+
+    console.log("QUALIFIED USERS:", qualified);
+    console.log("QUALIFIED COUNT:", qualified.length);
+
+    // ✅ Send only ONE response
     res.json({
-      total: Number(result.rows[0].count),
+      total: qualified.length,
     });
 
   } catch (err) {
