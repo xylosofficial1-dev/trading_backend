@@ -153,6 +153,38 @@ router.post("/close/:id", async (req, res) => {
     client.release();
   }
 }); 
+
+// ===========================
+// GET ALL TRADES (ADMIN / TEST)
+// ===========================
+router.get("/all", async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT *
+      FROM trades
+      ORDER BY created_at DESC
+    `);
+
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch all trades" });
+  }
+});
+
+// GET ALL CUSTOM RATES
+router.get("/custom-rates", async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT symbol, rate
+      FROM market_custom_rates
+    `);
+
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch rates" });
+  }
+});
  
 router.get("/closed/:userId", async (req, res) => {
   try {
@@ -175,8 +207,7 @@ router.get("/closed/:userId", async (req, res) => {
 });
 
 router.get("/open/:userId", async (req, res) => {
-  try {
-
+  try { 
     const { rows } = await pool.query(`
       SELECT 
         t.*,
@@ -187,9 +218,7 @@ router.get("/open/:userId", async (req, res) => {
       WHERE t.user_id=$1 AND t.status='open'
       ORDER BY t.created_at DESC
     `, [req.params.userId]);
-
     res.json(rows);
-
   } catch (err) {
     console.log(err);
     res.status(500).json({ error: "Fetch failed" });
