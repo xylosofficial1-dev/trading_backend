@@ -468,4 +468,47 @@ router.post("/auto-trade/toggle", async (req, res) => {
   }
 });
 
+router.post("/maintenance/toggle", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT maintenance FROM system_settings LIMIT 1"
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ message: "No settings found" });
+    }
+
+    const current = result.rows[0].maintenance;
+    const newValue = !current;
+
+    await pool.query(
+      "UPDATE system_settings SET maintenance = $1",
+      [newValue]
+    );
+
+    res.json({
+      success: true,
+      maintenance: newValue,
+    });
+  } catch (err) {
+    console.error("TOGGLE ERROR:", err);
+    res.status(500).json({ message: "Toggle failed" });
+  }
+});
+
+router.get("/maintenance", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT maintenance FROM system_settings LIMIT 1"
+    );
+
+    res.json({
+      maintenance: result.rows[0].maintenance,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 module.exports = router;
