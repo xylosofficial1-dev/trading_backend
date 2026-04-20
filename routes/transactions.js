@@ -50,7 +50,7 @@ router.get("/history/:userId", async (req, res) => {
 
   try {
     const query = `
-    SELECT 
+  SELECT 
   id,
   title,
   message,
@@ -73,11 +73,11 @@ router.get("/history/:userId", async (req, res) => {
 
 FROM notifications
 
-WHERE target_type='custom'
-AND POSITION($1::text IN target_users) > 0
+WHERE target_type = 'custom'
+AND $1::text = ANY(string_to_array(target_users, ','))
 AND message NOT ILIKE '%rejected%'
 
-ORDER BY created_at DESC
+ORDER BY created_at DESC;
     `;
 
     const { rows } = await pool.query(query, [userId]);
@@ -109,3 +109,5 @@ router.get("/:user_id", async (req, res) => {
   }
 });
 module.exports = router;
+
+// (',' || target_users || ',') LIKE '%,' || $1 || ',%'
