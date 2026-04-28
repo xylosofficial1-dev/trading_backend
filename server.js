@@ -6,23 +6,47 @@ const http = require("http");
 const { Server } = require("socket.io");
 
 const app = express();
-const corsOptions = {
-  origin: "https://trading-frontend-ac6o.onrender.com",
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true,
-};
-
-app.use(cors(corsOptions));
-app.use(express.json());
 
 const server = http.createServer(app);
 
+// ✅ CORS allowed origins
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "https://trading-frontend-ac6o.onrender.com",
+];
+
+// ✅ Apply CORS BEFORE any routes or middleware
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // allow Postman / mobile apps (no origin)
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      } else {
+        console.log("❌ CORS Blocked:", origin);
+        return callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+
+// ✅ Body parsing middleware
+app.use(express.json());
+
+// ✅ Socket.IO with CORS
 const io = new Server(server, {
   cors: {
-    origin: "https://trading-frontend-ac6o.onrender.com",
-    credentials: true
-  }
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ["GET", "POST"],
+  },
 });
 
 // store connected users
@@ -51,7 +75,6 @@ io.on("connection", (socket) => {
 app.set("io", io);
 app.set("onlineUsers", onlineUsers);
 
-
 // ROUTES
 const transactionsRoute = require("./routes/transactions");
 const authRoutes = require("./routes/authRoutes");
@@ -69,7 +92,7 @@ const withdrawalRoutes = require("./routes/withdrawalRoutes");
 const marketRoutes = require("./routes/marketRoutes");
 
 const { router: p2pRoutes, checkExpiredTrades } = require("./routes/p2pRoutes");
- 
+
 // USE ROUTES
 app.use("/api/transactions", transactionsRoute);
 app.use("/api/auth", authRoutes);
@@ -98,16 +121,17 @@ app.use("/api/test", require("./routes/testRoutes"));
 app.use("/api/monthly-salary", require("./routes/monthlySalaryRoutes"));
 app.use("/api/admin-income", require("./routes/adminIncomeRoutes"));
 
+// ✅ 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
 });
 
-// ✅ error handler (LAST)
+// ✅ Error handler (LAST)
 app.use((err, req, res, next) => {
   console.error("SERVER ERROR:", err);
   res.status(500).json({ error: "Internal Server Error" });
 });
- 
+
 // Check expired trades every minute
 setInterval(() => {
   checkExpiredTrades(io, onlineUsers);
@@ -118,4 +142,5 @@ const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
   console.log(`Backend running on http://localhost:${PORT}`);
+  console.log(`CORS enabled for: ${allowedOrigins.join(", ")}`);
 });
