@@ -6,7 +6,15 @@ const http = require("http");
 const { Server } = require("socket.io");
 
 const app = express();
-app.use(cors());
+const corsOptions = {
+  origin: "https://trading-frontend-ac6o.onrender.com",
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(express.json());
 
 const server = http.createServer(app);
