@@ -69,6 +69,23 @@ router.get("/admin/pending", async (req, res) => {
   res.json(result.rows);
 });
 
+router.get("/:id/screenshot", async (req, res) => {
+  const { id } = req.params;
+
+  const result = await pool.query(
+    "SELECT screenshot FROM payment_requests WHERE id = $1",
+    [id]
+  );
+
+  if (!result.rows.length) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  res.json({
+    screenshot: result.rows[0].screenshot.toString("base64"),
+  });
+});
+
 router.post("/admin/update-status", async (req, res) => {
   const { requestId, status, reason } = req.body;
 
@@ -121,6 +138,39 @@ router.get("/status/:userId", async (req, res) => {
 });
 
 // 🔐 Admin: fetch all payment requests
+// router.get("/admin/all", async (req, res) => {
+//   try {
+//     const result = await pool.query(`
+//       SELECT 
+//         pr.id,
+//         pr.user_id,
+//         u.email,
+//         pr.tx_hash,
+//         pr.amount_usd,
+//         pr.screenshot,
+//         pr.status,
+//         pr.admin_reason,
+//         pr.created_at,
+//         pr.updated_at
+//       FROM payment_requests pr
+//       JOIN users u ON u.id = pr.user_id
+//       ORDER BY pr.created_at DESC
+//     `);
+
+//     const data = result.rows.map(row => ({
+//       ...row,
+//       screenshot: row.screenshot
+//         ? Buffer.from(row.screenshot).toString("base64")
+//         : null
+//     }));
+
+//     res.json(data);
+//   } catch (err) {
+//     console.error("ADMIN FETCH ALL ERROR:", err);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
+
 router.get("/admin/all", async (req, res) => {
   try {
     const result = await pool.query(`
@@ -130,7 +180,6 @@ router.get("/admin/all", async (req, res) => {
         u.email,
         pr.tx_hash,
         pr.amount_usd,
-        pr.screenshot,
         pr.status,
         pr.admin_reason,
         pr.created_at,
@@ -140,14 +189,7 @@ router.get("/admin/all", async (req, res) => {
       ORDER BY pr.created_at DESC
     `);
 
-    const data = result.rows.map(row => ({
-      ...row,
-      screenshot: row.screenshot
-        ? Buffer.from(row.screenshot).toString("base64")
-        : null
-    }));
-
-    res.json(data);
+    res.json(result.rows);
   } catch (err) {
     console.error("ADMIN FETCH ALL ERROR:", err);
     res.status(500).json({ message: "Server error" });
