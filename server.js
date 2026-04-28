@@ -20,7 +20,10 @@ app.use(express.json());
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: { origin: "*" }
+  cors: {
+    origin: "https://trading-frontend-ac6o.onrender.com",
+    credentials: true
+  }
 });
 
 // store connected users
@@ -48,6 +51,7 @@ io.on("connection", (socket) => {
 // make io available in routes
 app.set("io", io);
 app.set("onlineUsers", onlineUsers);
+
 
 // ROUTES
 const transactionsRoute = require("./routes/transactions");
@@ -94,6 +98,16 @@ app.use("/api/referral-task", require("./routes/referralTaskIncomeRoutes"));
 app.use("/api/test", require("./routes/testRoutes"));
 app.use("/api/monthly-salary", require("./routes/monthlySalaryRoutes"));
 app.use("/api/admin-income", require("./routes/adminIncomeRoutes"));
+
+app.use((req, res) => {
+  res.status(404).json({ error: "Route not found" });
+});
+
+// ✅ error handler (LAST)
+app.use((err, req, res, next) => {
+  console.error("SERVER ERROR:", err);
+  res.status(500).json({ error: "Internal Server Error" });
+});
  
 // Check expired trades every minute
 setInterval(() => {
