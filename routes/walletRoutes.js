@@ -257,7 +257,8 @@ router.get("/check/:userId", async (req, res) => {
       `SELECT 
          id,
          wallet_amount,
-         trading_wallet_amount
+         trading_wallet_amount,
+         wallet_address
        FROM users
        WHERE id = $1`,
       [userId]
