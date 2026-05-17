@@ -1,6 +1,6 @@
 // // backend/routes/monthlySalaryRoutes.js
 const express = require("express");
-const router = express.Router();
+const router = express.Router(); 
 const pool = require("../db/db");
 
 const getDirectBusiness = require("../utils/directBusinessCalculator");
@@ -252,20 +252,179 @@ router.get("/status/:userId", async (req, res) => {
     });
   }
 });
-
 router.get("/dashboard/:userId", async (req, res) => {
 
   try {
 
-    const userId = req.params.userId;
+    const userId = parseInt(req.params.userId);
 
-    const business = await getDirectBusiness(userId);
+    // =========================
+    // TOTAL BUSINESS
+    // =========================
 
-    // ACTIVE STATUS
+    const businessResult = await pool.query(
+
+      `
+      WITH RECURSIVE downline AS (
+
+          SELECT
+              id,
+              name,
+              phone,
+              parent_id,
+              trading_wallet_amount,
+              1 AS level
+          FROM users
+          WHERE parent_id = $1
+
+          UNION ALL
+
+          SELECT
+              u.id,
+              u.name,
+              u.phone,
+              u.parent_id,
+              u.trading_wallet_amount,
+              d.level + 1
+          FROM users u
+          INNER JOIN downline d
+              ON u.parent_id = d.id
+      )
+
+      SELECT
+          COUNT(*) AS total_members,
+          COALESCE(SUM(trading_wallet_amount),0)
+              AS total_business
+      FROM downline
+      `,
+      [userId]
+    );
+
+    const totalBusiness =
+      Number(businessResult.rows[0].total_business) || 0;
+
+    const totalMembers =
+      Number(businessResult.rows[0].total_members) || 0;
+
+    // =========================
+    // ALL CHILD DETAILS
+    // =========================
+
+    const childsResult = await pool.query(
+
+      `
+      WITH RECURSIVE downline AS (
+
+          SELECT
+              id,
+              name,
+              phone,
+              parent_id,
+              trading_wallet_amount,
+              1 AS level
+          FROM users
+          WHERE parent_id = $1
+
+          UNION ALL
+
+          SELECT
+              u.id,
+              u.name,
+              u.phone,
+              u.parent_id,
+              u.trading_wallet_amount,
+              d.level + 1
+          FROM users u
+          INNER JOIN downline d
+              ON u.parent_id = d.id
+      )
+
+      SELECT *
+      FROM downline
+      ORDER BY level, trading_wallet_amount DESC
+      `,
+      [userId]
+    );
+
+    // =========================
+    // TOP BUSINESS LEGS
+    // =========================
+
+    const topLegs = await pool.query(
+
+      `
+      WITH RECURSIVE tree AS (
+
+          SELECT
+              id,
+              name,
+              parent_id,
+              trading_wallet_amount,
+              id AS root_child
+          FROM users
+          WHERE parent_id = $1
+
+          UNION ALL
+
+          SELECT
+              u.id,
+              u.name,
+              u.parent_id,
+              u.trading_wallet_amount,
+              t.root_child
+          FROM users u
+          JOIN tree t
+              ON u.parent_id = t.id
+      )
+
+      SELECT
+          rc.id AS child_id,
+          rc.name AS child_name,
+
+          COUNT(tree.id) AS total_team,
+
+          COALESCE(
+            SUM(tree.trading_wallet_amount),
+            0
+          ) AS total_team_business
+
+      FROM tree
+
+      JOIN users rc
+          ON rc.id = tree.root_child
+
+      GROUP BY rc.id, rc.name
+
+      ORDER BY total_team_business DESC
+      `
+      ,
+      [userId]
+    );
+
+    // =========================
+    // CLAIM HISTORY
+    // =========================
+
+    const history = await pool.query(
+      `
+      SELECT *
+      FROM monthly_salary_claims
+      WHERE user_id=$1
+      ORDER BY claimed_at DESC
+      `,
+      [userId]
+    );
+
+    // =========================
+    // STATUS
+    // =========================
+
     const statusResult = await pool.query(
-      `SELECT *
-       FROM monthly_salary_status
-       WHERE user_id=$1`,
+      `
+      SELECT *
+      FROM monthly_salary_status
+      WHERE user_id=$1
+      `,
       [userId]
     );
 
@@ -281,20 +440,24 @@ router.get("/dashboard/:userId", async (req, res) => {
         statusResult.rows[0].next_claim_at;
     }
 
-    // HISTORY
-    const history = await pool.query(
-      `SELECT *
-       FROM monthly_salary_claims
-       WHERE user_id=$1
-       ORDER BY claimed_at DESC`,
-      [userId]
-    );
-
     res.json({
-      directBusiness: business,
+
+      success: true,
+
+      directBusiness: totalBusiness,
+
+      totalMembers,
+
       claimableAmount,
+
+      nextClaimDate,
+
       history: history.rows,
-      nextClaimDate
+
+      referrals: childsResult.rows,
+
+      topLeaders: topLegs.rows
+
     });
 
   } catch (err) {
@@ -304,8 +467,64 @@ router.get("/dashboard/:userId", async (req, res) => {
     res.status(500).json({
       error: "Server error"
     });
+
   }
+
 });
+
+// router.get("/dashboard/:userId", async (req, res) => {
+
+//   try {
+
+//     const userId = req.params.userId;
+
+//     const business = await getDirectBusiness(userId);
+
+//     // ACTIVE STATUS
+//     const statusResult = await pool.query(
+//       `SELECT *
+//        FROM monthly_salary_status
+//        WHERE user_id=$1`,
+//       [userId]
+//     );
+
+//     let claimableAmount = 0;
+//     let nextClaimDate = null;
+
+//     if (statusResult.rowCount > 0) {
+
+//       claimableAmount =
+//         Number(statusResult.rows[0].current_salary);
+
+//       nextClaimDate =
+//         statusResult.rows[0].next_claim_at;
+//     }
+
+//     // HISTORY
+//     const history = await pool.query(
+//       `SELECT *
+//        FROM monthly_salary_claims
+//        WHERE user_id=$1
+//        ORDER BY claimed_at DESC`,
+//       [userId]
+//     );
+
+//     res.json({
+//       directBusiness: business,
+//       claimableAmount,
+//       history: history.rows,
+//       nextClaimDate
+//     });
+
+//   } catch (err) {
+
+//     console.log(err);
+
+//     res.status(500).json({
+//       error: "Server error"
+//     });
+//   }
+// });
 
 // router.post("/claim/:userId", async (req, res) => {
 //   try {
