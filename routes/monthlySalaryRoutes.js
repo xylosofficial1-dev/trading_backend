@@ -252,225 +252,94 @@ router.get("/status/:userId", async (req, res) => {
     });
   }
 });
-router.get("/dashboard/:userId", async (req, res) => {
+// router.get("/dashboard/:userId", async (req, res) => {
 
-  try {
+//   try {
 
-    const userId = parseInt(req.params.userId);
+//     const userId = parseInt(req.params.userId);
 
-    // =========================
-    // TOTAL BUSINESS
-    // =========================
+//     // DIRECT BUSINESS ONLY
+//     const business = await getDirectBusiness(userId);
 
-    const businessResult = await pool.query(
+//     // DIRECT CHILDREN ONLY
+//     const referrals = await pool.query(
+//       `
+//       SELECT
+//         id,
+//         name,
+//         phone,
+//         trading_wallet_amount
+//       FROM users
+//       WHERE parent_id = $1
+//       ORDER BY trading_wallet_amount DESC
+//       `,
+//       [userId]
+//     );
 
-      `
-      WITH RECURSIVE downline AS (
+//     // CLAIM HISTORY
+//     const history = await pool.query(
+//       `
+//       SELECT *
+//       FROM monthly_salary_claims
+//       WHERE user_id = $1
+//       ORDER BY claimed_at DESC
+//       `,
+//       [userId]
+//     );
 
-          SELECT
-              id,
-              name,
-              phone,
-              parent_id,
-              trading_wallet_amount,
-              1 AS level
-          FROM users
-          WHERE parent_id = $1
+//     // STATUS
+//     const statusResult = await pool.query(
+//       `
+//       SELECT *
+//       FROM monthly_salary_status
+//       WHERE user_id = $1
+//       `,
+//       [userId]
+//     );
 
-          UNION ALL
+//     let claimableAmount = 0;
+//     let nextClaimDate = null;
 
-          SELECT
-              u.id,
-              u.name,
-              u.phone,
-              u.parent_id,
-              u.trading_wallet_amount,
-              d.level + 1
-          FROM users u
-          INNER JOIN downline d
-              ON u.parent_id = d.id
-      )
+//     if (statusResult.rowCount > 0) {
 
-      SELECT
-          COUNT(*) AS total_members,
-          COALESCE(SUM(trading_wallet_amount),0)
-              AS total_business
-      FROM downline
-      `,
-      [userId]
-    );
+//       claimableAmount =
+//         Number(statusResult.rows[0].current_salary);
 
-    const totalBusiness =
-      Number(businessResult.rows[0].total_business) || 0;
+//       nextClaimDate =
+//         statusResult.rows[0].next_claim_at;
+//     }
 
-    const totalMembers =
-      Number(businessResult.rows[0].total_members) || 0;
+//     res.json({
 
-    // =========================
-    // ALL CHILD DETAILS
-    // =========================
+//       success: true,
 
-    const childsResult = await pool.query(
+//       directBusiness: business,
 
-      `
-      WITH RECURSIVE downline AS (
+//       totalMembers: referrals.rows.length,
 
-          SELECT
-              id,
-              name,
-              phone,
-              parent_id,
-              trading_wallet_amount,
-              1 AS level
-          FROM users
-          WHERE parent_id = $1
+//       referrals: referrals.rows,
 
-          UNION ALL
+//       topLeaders: referrals.rows,
 
-          SELECT
-              u.id,
-              u.name,
-              u.phone,
-              u.parent_id,
-              u.trading_wallet_amount,
-              d.level + 1
-          FROM users u
-          INNER JOIN downline d
-              ON u.parent_id = d.id
-      )
+//       claimableAmount,
 
-      SELECT *
-      FROM downline
-      ORDER BY level, trading_wallet_amount DESC
-      `,
-      [userId]
-    );
+//       nextClaimDate,
 
-    // =========================
-    // TOP BUSINESS LEGS
-    // =========================
+//       history: history.rows
 
-    const topLegs = await pool.query(
+//     });
 
-      `
-      WITH RECURSIVE tree AS (
+//   } catch (err) {
 
-          SELECT
-              id,
-              name,
-              parent_id,
-              trading_wallet_amount,
-              id AS root_child
-          FROM users
-          WHERE parent_id = $1
+//     console.log(err);
 
-          UNION ALL
+//     res.status(500).json({
+//       error: "Server error"
+//     });
 
-          SELECT
-              u.id,
-              u.name,
-              u.parent_id,
-              u.trading_wallet_amount,
-              t.root_child
-          FROM users u
-          JOIN tree t
-              ON u.parent_id = t.id
-      )
+//   }
 
-      SELECT
-          rc.id AS child_id,
-          rc.name AS child_name,
-
-          COUNT(tree.id) AS total_team,
-
-          COALESCE(
-            SUM(tree.trading_wallet_amount),
-            0
-          ) AS total_team_business
-
-      FROM tree
-
-      JOIN users rc
-          ON rc.id = tree.root_child
-
-      GROUP BY rc.id, rc.name
-
-      ORDER BY total_team_business DESC
-      `
-      ,
-      [userId]
-    );
-
-    // =========================
-    // CLAIM HISTORY
-    // =========================
-
-    const history = await pool.query(
-      `
-      SELECT *
-      FROM monthly_salary_claims
-      WHERE user_id=$1
-      ORDER BY claimed_at DESC
-      `,
-      [userId]
-    );
-
-    // =========================
-    // STATUS
-    // =========================
-
-    const statusResult = await pool.query(
-      `
-      SELECT *
-      FROM monthly_salary_status
-      WHERE user_id=$1
-      `,
-      [userId]
-    );
-
-    let claimableAmount = 0;
-    let nextClaimDate = null;
-
-    if (statusResult.rowCount > 0) {
-
-      claimableAmount =
-        Number(statusResult.rows[0].current_salary);
-
-      nextClaimDate =
-        statusResult.rows[0].next_claim_at;
-    }
-
-    res.json({
-
-      success: true,
-
-      directBusiness: totalBusiness,
-
-      totalMembers,
-
-      claimableAmount,
-
-      nextClaimDate,
-
-      history: history.rows,
-
-      referrals: childsResult.rows,
-
-      topLeaders: topLegs.rows
-
-    });
-
-  } catch (err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      error: "Server error"
-    });
-
-  }
-
-});
+// });
 
 // router.get("/dashboard/:userId", async (req, res) => {
 
@@ -757,6 +626,130 @@ router.get("/dashboard/:userId", async (req, res) => {
 //   }
 // });
 
+router.get("/dashboard/:userId", async (req, res) => {
+
+  try {
+
+    const userId = parseInt(req.params.userId);
+
+    if (!userId || isNaN(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid userId"
+      });
+    }
+
+    // =========================
+    // DIRECT BUSINESS ONLY
+    // =========================
+
+    const business = await getDirectBusiness(userId);
+
+    // =========================
+    // CURRENT LEVEL
+    // =========================
+
+    const currentRule = rules
+      .filter(r => business >= r.business)
+      .pop();
+
+    const claimableAmount =
+      currentRule?.salary || 0;
+
+    // =========================
+    // DIRECT REFERRALS ONLY
+    // =========================
+
+    const referralsResult = await pool.query(
+      `
+      SELECT
+        id,
+        name,
+        phone,
+        trading_wallet_amount,
+        created_at
+      FROM users
+      WHERE parent_id = $1
+      ORDER BY trading_wallet_amount DESC
+      `,
+      [userId]
+    );
+
+    // =========================
+    // CLAIM HISTORY
+    // =========================
+
+    const historyResult = await pool.query(
+      `
+      SELECT
+        id,
+        salary_amount,
+        business_level,
+        claimed_at
+      FROM monthly_salary_claims
+      WHERE user_id = $1
+      ORDER BY claimed_at DESC
+      `,
+      [userId]
+    );
+
+    // =========================
+    // NEXT CLAIM DATE
+    // FROM LAST claimed_at
+    // =========================
+
+    let nextClaimDate = null;
+
+    if (historyResult.rowCount > 0) {
+
+      const lastClaimDate = new Date(
+        historyResult.rows[0].claimed_at
+      );
+
+      lastClaimDate.setDate(
+        lastClaimDate.getDate() + 30
+      );
+
+      nextClaimDate = lastClaimDate;
+    }
+
+    // =========================
+    // RESPONSE
+    // =========================
+
+    res.json({
+
+      success: true,
+
+      directBusiness: business,
+
+      totalMembers:
+        referralsResult.rows.length,
+
+      claimableAmount,
+
+      nextClaimDate,
+
+      history: historyResult.rows,
+
+      referrals: referralsResult.rows,
+
+      topLeaders: referralsResult.rows
+
+    });
+
+  } catch (err) {
+
+    console.log(err);
+
+    res.status(500).json({
+      success: false,
+      error: "Server error"
+    });
+
+  }
+
+});
 router.get("/history/:userId", async (req, res) => {
   try {
     const userId = parseInt(req.params.userId);
