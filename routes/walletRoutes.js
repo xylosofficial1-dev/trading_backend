@@ -135,14 +135,27 @@ if (type === "MAIN_TO_TRADE") {
     throw new Error("Insufficient Primary Credit Balance balance");
   }
 
-  // 1️⃣ Deduct from main
-  await client.query(
-    `UPDATE users
-     SET wallet_amount = wallet_amount - $1,
-         trading_wallet_amount = trading_wallet_amount + $1
-     WHERE id = $2`,
-    [amount, userId]
-  );
+ // 1️⃣ Transfer balance
+await client.query(
+  `UPDATE users
+   SET wallet_amount = wallet_amount - $1,
+       trading_wallet_amount = trading_wallet_amount + $1
+   WHERE id = $2`,
+  [amount, userId]
+);
+
+// 2️⃣ Store business volume ONLY when activated
+await client.query(
+  `
+  INSERT INTO wallet_transfers (
+    user_id,
+    transfer_type,
+    amount
+  )
+  VALUES ($1, $2, $3)
+  `,
+  [userId, 'MAIN_TO_TRADE', amount]
+);
 
   // 2️⃣ 🔥 ADD THIS LINE (VERY IMPORTANT)
   await distributeLevelCommission(client, userId, amount);
@@ -231,6 +244,155 @@ await client.query(
     res.status(400).json({ message: err.message });
   } finally {
     client.release();
+  }
+});
+
+// routes/wallet.js
+
+router.post("/address-send", async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { senderId, recipientAddress, amount } = req.body;
+
+    await client.query("BEGIN");
+
+    // sender
+    const senderRes = await client.query(
+      `SELECT id, wallet_amount, wallet_address
+       FROM users
+       WHERE id = $1
+       FOR UPDATE`,
+      [senderId]
+    );
+
+    if (senderRes.rows.length === 0) {
+      throw new Error("Sender not found");
+    }
+
+    const sender = senderRes.rows[0];
+
+    // receiver
+    const receiverRes = await client.query(
+      `SELECT id, wallet_address
+       FROM users
+       WHERE LOWER(wallet_address) = LOWER($1)
+       FOR UPDATE`,
+      [recipientAddress]
+    );
+
+    if (receiverRes.rows.length === 0) {
+      throw new Error("Recipient wallet not found");
+    }
+
+    const receiver = receiverRes.rows[0];
+
+    if (Number(sender.wallet_amount) < Number(amount)) {
+      throw new Error("Insufficient balance");
+    }
+
+    // deduct sender
+    await client.query(
+      `UPDATE users
+       SET wallet_amount = wallet_amount - $1
+       WHERE id = $2`,
+      [amount, senderId]
+    );
+
+    // add receiver
+    await client.query(
+      `UPDATE users
+       SET wallet_amount = wallet_amount + $1
+       WHERE id = $2`,
+      [amount, receiver.id]
+    );
+
+    // ✅ SAVE HISTORY
+    await client.query(
+      `INSERT INTO wallet_transfer_history
+      (
+        sender_id,
+        receiver_id,
+        sender_wallet,
+        receiver_wallet,
+        amount,
+        status
+      )
+      VALUES($1,$2,$3,$4,$5,'completed')`,
+      [
+        senderId,
+        receiver.id,
+        sender.wallet_address,
+        receiver.wallet_address,
+        amount
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({
+      success: true,
+      message: "Transfer successful"
+    });
+
+  } catch (err) {
+    await client.query("ROLLBACK");
+
+    res.status(400).json({
+      success: false,
+      error: err.message
+    });
+
+  } finally {
+    client.release();
+  }
+});
+
+// Get wallet transfer history
+router.get("/transfer-history/:userId", async (req, res) => {
+  try {
+
+    const { userId } = req.params;
+
+    const result = await pool.query(
+      `
+      SELECT
+        h.id,
+        h.amount,
+        h.status,
+        h.created_at,
+
+        s.name AS sender_name,
+        r.name AS receiver_name,
+
+        h.sender_id,
+        h.receiver_id
+
+      FROM wallet_transfer_history h
+
+      JOIN users s ON s.id = h.sender_id
+      JOIN users r ON r.id = h.receiver_id
+
+      WHERE h.sender_id = $1
+         OR h.receiver_id = $1
+
+      ORDER BY h.created_at DESC
+      `,
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      data: result.rows
+    });
+
+  } catch (err) {
+    console.log(err);
+
+    res.status(500).json({
+      success: false,
+      error: "Server error"
+    });
   }
 });
 

@@ -26,6 +26,85 @@ function generateWallet() {
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+
+// Recursive function
+async function getChildren(parentId) {
+  const result = await pool.query(
+    `
+    SELECT 
+      id,
+      name,
+      email,
+      phone,
+      wallet_amount,
+      trading_wallet_amount,
+      parent_id
+    FROM users
+    WHERE parent_id = $1
+    ORDER BY id ASC
+    `,
+    [parentId]
+  );
+
+  const children = result.rows;
+
+  for (let child of children) {
+    child.children = await getChildren(child.id);
+  }
+
+  return children;
+}
+
+// GET USER TREE
+router.get("/users/tree/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Current user
+    const userResult = await pool.query(
+      `
+      SELECT 
+        u.id,
+        u.name,
+        u.email,
+        u.phone,
+        u.parent_id,
+        p.name AS parent_name,
+        p.email AS parent_email
+      FROM users u
+      LEFT JOIN users p ON u.parent_id = p.id
+      WHERE u.id = $1
+      `,
+      [id]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // Get all children recursively
+    const children = await getChildren(id);
+
+    user.children = children;
+
+    res.json({
+      success: true,
+      data: user,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+});
+
 /* ================= SEND OTP ================= */
 router.post("/send-otp", async (req, res) => {
   try {
@@ -684,6 +763,42 @@ router.get("/account-status/:id", async (req, res) => {
   }
 });
 
+router.put("/users/:id/amounts", async (req, res) => {
+  try {
+    const { id } = req.params;
 
+    const {
+      wallet_amount,
+      trading_wallet_amount,
+    } = req.body;
+
+    await pool.query(
+      `
+      UPDATE users
+      SET
+        wallet_amount = $1,
+        trading_wallet_amount = $2
+      WHERE id = $3
+      `,
+      [
+        wallet_amount,
+        trading_wallet_amount,
+        id,
+      ]
+    );
+
+    res.json({
+      success: true,
+      message: "Amounts updated",
+    });
+  } catch (err) {
+    console.error(err);
+
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+});
 
 module.exports = router;

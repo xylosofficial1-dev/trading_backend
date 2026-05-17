@@ -90,6 +90,7 @@ const swapRoutes = require("./routes/swapRoutes");
 const supportRoutes = require("./routes/supportRoutes");
 const withdrawalRoutes = require("./routes/withdrawalRoutes");
 const marketRoutes = require("./routes/marketRoutes");
+const kycRoutes = require("./routes/kyc");
 
 const { router: p2pRoutes, checkExpiredTrades } = require("./routes/p2pRoutes");
 
@@ -109,6 +110,8 @@ app.use("/api/swap", swapRoutes);
 app.use("/api/support", supportRoutes);
 app.use("/api/withdrawal", withdrawalRoutes);
 app.use("/api/market", marketRoutes);
+app.use("/api/kyc", kycRoutes);
+
 
 app.use("/api/pay-options", require("./routes/payOptionsRoutes"));
 app.use("/api/payments", require("./routes/paymentRequestRoutes"));

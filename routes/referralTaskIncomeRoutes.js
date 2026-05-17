@@ -181,17 +181,43 @@ router.get("/dashboard/:parentId", async (req, res) => {
       [parentId]
     );
 
-    // Get deposit stats for each level
-    const depositStats = await pool.query(
+     const depositStats = await pool.query(
       `SELECT 
-        COUNT(*) FILTER (WHERE trading_wallet_amount >= 100) as level1,
-COUNT(*) FILTER (WHERE trading_wallet_amount >= 350) as level2,
-COUNT(*) FILTER (WHERE trading_wallet_amount >= 850) as level3,
-COUNT(*) FILTER (WHERE trading_wallet_amount >= 1850) as level4
-       FROM users
-       WHERE parent_id = $1`,
+COUNT(*) FILTER (
+  WHERE trading_wallet_amount >= 100
+  AND trading_wallet_amount < 350
+) as level1,
+
+COUNT(*) FILTER (
+  WHERE trading_wallet_amount >= 350
+  AND trading_wallet_amount < 850
+) as level2,
+
+COUNT(*) FILTER (
+  WHERE trading_wallet_amount >= 850
+  AND trading_wallet_amount < 1850
+) as level3,
+
+COUNT(*) FILTER (
+  WHERE trading_wallet_amount >= 1850
+) as level4
+
+FROM users
+WHERE parent_id = $1`,
       [parentId]
     );
+
+    // Get deposit stats for each level
+//     const depositStats = await pool.query(
+//       `SELECT 
+//         COUNT(*) FILTER (WHERE trading_wallet_amount >= 100) as level1,
+// COUNT(*) FILTER (WHERE trading_wallet_amount >= 350) as level2,
+// COUNT(*) FILTER (WHERE trading_wallet_amount >= 850) as level3,
+// COUNT(*) FILTER (WHERE trading_wallet_amount >= 1850) as level4
+//        FROM users
+//        WHERE parent_id = $1`,
+//       [parentId]
+//     );
 
     // Get reward history
     const rewards = await pool.query(
@@ -255,6 +281,106 @@ LIMIT 10`,
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+router.get("/engagement-network/:parentId", async (req, res) => {
+  try {
+
+    const { parentId } = req.params;
+
+    const directChildren = await pool.query(
+      `
+      SELECT
+        id,
+        email,
+        phone,
+        trading_wallet_amount
+      FROM users
+      WHERE parent_id = $1
+      ORDER BY id DESC
+      `,
+      [parentId]
+    );
+
+    res.json({
+      success: true,
+      directChildren: directChildren.rows,
+    });
+
+  } catch (err) {
+
+    console.log(err);
+
+    res.status(500).json({
+      error: "Server error",
+    });
+  }
+});
+
+router.get("/network-levels/:userId", async (req, res) => {
+
+  try {
+
+    const { userId } = req.params;
+
+    const levels = [];
+
+    let currentParents = [Number(userId)];
+
+    for (let level = 1; level <= 5; level++) {
+
+      if (currentParents.length === 0) {
+
+        levels.push({
+          level,
+          total: 0,
+          active: 0,
+        });
+
+        continue;
+      }
+
+      const result = await pool.query(
+        `
+        SELECT
+          id,
+          trading_wallet_amount
+        FROM users
+        WHERE parent_id = ANY($1::int[])
+        `,
+        [currentParents]
+      );
+
+      const rows = result.rows;
+
+      const total = rows.length;
+
+      const active = rows.filter(
+        (u) => Number(u.trading_wallet_amount) >= 100
+      ).length;
+
+      levels.push({
+        level,
+        total,
+        active,
+      });
+
+      currentParents = rows.map((r) => r.id);
+    }
+
+    res.json({
+      success: true,
+      levels,
+    });
+
+  } catch (err) {
+
+    console.log(err);
+
+    res.status(500).json({
+      error: "Server error",
+    });
   }
 });
 

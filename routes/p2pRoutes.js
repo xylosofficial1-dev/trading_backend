@@ -812,17 +812,30 @@ router.get("/trade-history/:userId", async (req, res) => {
     const result = await pool.query(
       `
       SELECT 
-        id,
-        buyer_id,
-        seller_id,
-        listing_id,
-        quantity,
-        price,
-        total,
-        completed_at
-      FROM p2p_trade_history
-      WHERE buyer_id = $1 OR seller_id = $1
-      ORDER BY completed_at DESC
+        h.id,
+        h.buyer_id,
+        h.seller_id,
+        h.listing_id,
+        h.quantity,
+        h.price,
+        h.total,
+        h.completed_at,
+
+        buyer.name AS buyer_name,
+        seller.name AS seller_name
+
+      FROM p2p_trade_history h
+
+      JOIN users buyer 
+      ON buyer.id = h.buyer_id
+
+      JOIN users seller
+      ON seller.id = h.seller_id
+
+      WHERE h.buyer_id = $1 
+      OR h.seller_id = $1
+
+      ORDER BY h.completed_at DESC
       `,
       [userId]
     );
@@ -886,112 +899,164 @@ router.get("/my-listings/:userId", async (req, res) => {
 
 async function checkExpiredTrades(io, onlineUsers) {
   try {
-    // GET PENALTY AMOUNT FROM ADMIN SETTING
-    const penaltySetting = await pool.query(
-      `SELECT penalty_amount
-       FROM p2p_penalty_settings
-       ORDER BY id DESC
-       LIMIT 1`
-    );
-
-    const penalty = penaltySetting.rows.length > 0 
-      ? parseFloat(penaltySetting.rows[0].penalty_amount) 
-      : 10; // fallback if admin not set
-
-    console.log(`Checking expired trades with penalty amount: ${penalty}`);
+    const FIXED_PENALTY = 10;
 
     const data = await pool.query(
-      `SELECT * FROM p2p_buy_requests
-       WHERE status IN ('accepted', 'paid')
-       AND expires_at IS NOT NULL
-       AND expires_at < NOW()`
+      `
+      SELECT *
+      FROM p2p_buy_requests
+      WHERE status IN ('accepted', 'paid')
+      AND expires_at IS NOT NULL
+      AND expires_at < NOW()
+      `
     );
 
     for (const r of data.rows) {
-      // Start a transaction to ensure all operations succeed or fail together
       const client = await pool.connect();
-      
+
       try {
-        await client.query('BEGIN');
+        await client.query("BEGIN");
 
-        // Deduct penalty from both users
+        // 🔒 Lock buyer + seller
+        const buyerRes = await client.query(
+          `
+          SELECT wallet_amount
+          FROM users
+          WHERE id = $1
+          FOR UPDATE
+          `,
+          [r.buyer_id]
+        );
+
+        const sellerRes = await client.query(
+          `
+          SELECT wallet_amount
+          FROM users
+          WHERE id = $1
+          FOR UPDATE
+          `,
+          [r.seller_id]
+        );
+
+        const buyerBalance =
+          Number(buyerRes.rows[0]?.wallet_amount || 0);
+
+        const sellerBalance =
+          Number(sellerRes.rows[0]?.wallet_amount || 0);
+
+        // ✅ Deduct only if enough balance
+        const buyerPenalty =
+          buyerBalance >= FIXED_PENALTY
+            ? FIXED_PENALTY
+            : buyerBalance;
+
+        const sellerPenalty =
+          sellerBalance >= FIXED_PENALTY
+            ? FIXED_PENALTY
+            : sellerBalance;
+
+        // 🔻 Buyer deduction
         await client.query(
-          `UPDATE users
-           SET wallet_amount = wallet_amount - $1
-           WHERE id = $2`,
-          [penalty, r.buyer_id]
+          `
+          UPDATE users
+          SET wallet_amount = wallet_amount - $1
+          WHERE id = $2
+          `,
+          [buyerPenalty, r.buyer_id]
+        );
+
+        // 🔻 Seller deduction
+        await client.query(
+          `
+          UPDATE users
+          SET wallet_amount = wallet_amount - $1
+          WHERE id = $2
+          `,
+          [sellerPenalty, r.seller_id]
+        );
+
+        // ✅ Notifications
+        await client.query(
+          `
+          INSERT INTO notifications
+          (title, message, target_type, target_users)
+          VALUES ($1, $2, 'custom', $3)
+          `,
+          [
+            "Trade Expired",
+            `$${buyerPenalty} deducted because P2P trade was not completed within 30 minutes.`,
+            String(r.buyer_id)
+          ]
         );
 
         await client.query(
-          `UPDATE users
-           SET wallet_amount = wallet_amount - $1
-           WHERE id = $2`,
-          [penalty, r.seller_id]
+          `
+          INSERT INTO notifications
+          (title, message, target_type, target_users)
+          VALUES ($1, $2, 'custom', $3)
+          `,
+          [
+            "Trade Expired",
+            `$${sellerPenalty} deducted because P2P trade was not completed within 30 minutes.`,
+            String(r.seller_id)
+          ]
         );
 
-        // Add penalty notifications
-        const notificationMessage = `$${penalty} deducted due to incomplete P2P trade`;
-        
+        // ✅ Mark expired
         await client.query(
-          `INSERT INTO notifications (user_id, title, message, created_at)
-           VALUES ($1, 'Penalty Deducted', $2, NOW())`,
-          [r.buyer_id, notificationMessage]
-        );
-
-        await client.query(
-          `INSERT INTO notifications (user_id, title, message, created_at)
-           VALUES ($1, 'Penalty Deducted', $2, NOW())`,
-          [r.seller_id, notificationMessage]
-        );
-
-        // Update request status
-        await client.query(
-          `UPDATE p2p_buy_requests
-           SET status = 'expired'
-           WHERE id = $1`,
+          `
+          UPDATE p2p_buy_requests
+          SET status = 'expired'
+          WHERE id = $1
+          `,
           [r.id]
         );
 
-        // Activate listing again
+        // ✅ Reactivate listing
         await client.query(
-          `UPDATE p2p_sell_listings
-           SET status = 'active'
-           WHERE id = $1`,
+          `
+          UPDATE p2p_sell_listings
+          SET status = 'active'
+          WHERE id = $1
+          `,
           [r.listing_id]
         );
 
-        await client.query('COMMIT');
+        await client.query("COMMIT");
 
-        // Notify buyer
+        // 🔔 SOCKET EVENTS
         const buyerSocket = onlineUsers[r.buyer_id];
+
         if (buyerSocket) {
           io.to(buyerSocket).emit("trade-expired", {
             request_id: r.id,
-            message: `Trade expired. $${penalty} penalty deducted`
+            message: `Trade expired. $${buyerPenalty} deducted`
           });
         }
 
-        // Notify seller
         const sellerSocket = onlineUsers[r.seller_id];
+
         if (sellerSocket) {
           io.to(sellerSocket).emit("trade-expired", {
             request_id: r.id,
-            message: `Trade expired. $${penalty} penalty deducted`
+            message: `Trade expired. $${sellerPenalty} deducted`
           });
         }
 
-        console.log(`Trade ${r.id} expired, $${penalty} penalty deducted from users ${r.buyer_id} and ${r.seller_id}`);
+        console.log(
+          `Expired trade ${r.id}. Buyer -$${buyerPenalty}, Seller -$${sellerPenalty}`
+        );
 
       } catch (err) {
-        await client.query('ROLLBACK');
-        console.error(`Error processing expired trade ${r.id}:`, err);
+        await client.query("ROLLBACK");
+        console.log("Expired trade error:", err);
       } finally {
         client.release();
       }
     }
 
   } catch (err) {
-    console.log("Error in checkExpiredTrades:", err);
+    console.log("checkExpiredTrades error:", err);
   }
 }
 

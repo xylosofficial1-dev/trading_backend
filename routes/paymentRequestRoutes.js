@@ -56,6 +56,67 @@ const tx_hash = req.body.tx_hash.trim().toLowerCase();
 }
   }
 );
+// CHECK USER KYC STATUS
+router.get("/check-kyc/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const result = await pool.query(
+      `
+      SELECT kyc_verify
+      FROM users
+      WHERE id = $1
+      `,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: "User not found",
+      });
+    }
+
+    res.json({
+      verified: result.rows[0].kyc_verify === true,
+    });
+
+  } catch (err) {
+    console.error("KYC check error:", err);
+
+    res.status(500).json({
+      message: "Failed to check KYC",
+    });
+  }
+});
+// GET USER PAYMENT HISTORY
+router.get("/history/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const result = await pool.query(
+      `
+      SELECT 
+        id,
+        tx_hash,
+        amount_usd,
+        status,
+        admin_reason,
+        created_at
+      FROM payment_requests
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      `,
+      [userId]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("History fetch error:", err);
+    res.status(500).json({
+      message: "Failed to fetch payment history",
+    });
+  }
+});
 
 router.get("/admin/pending", async (req, res) => {
   const result = await pool.query(`

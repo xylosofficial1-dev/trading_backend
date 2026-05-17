@@ -89,14 +89,11 @@ router.post("/distribute-commission", async (req, res) => {
     if (lastRunResult.rowCount) {
       const lastRun = new Date(lastRunResult.rows[0].last_run);
       const now = new Date();
-
       const diffHours = (now - lastRun) / (1000 * 60 * 60);
 
-      if (diffHours < 24) {
-        const remaining = (24 - diffHours).toFixed(2);
-
+      if (diffHours < 16) {
+        const remaining = (16 - diffHours).toFixed(2);
         await client.query("ROLLBACK");
-
         return res.status(400).json({
           success: false,
           message: `Commission already distributed. Try again after ${remaining} hours.`,
@@ -107,154 +104,236 @@ router.post("/distribute-commission", async (req, res) => {
     /* ===============================
        💰 DISTRIBUTE COMMISSION
     =============================== */
-
     const users = await client.query(`
       SELECT 
         u.id,
         u.auto_trade,
         u.wallet_amount,
         u.trading_wallet_amount,
-       COUNT(r.id) FILTER (
-  WHERE r.trading_wallet_amount >= 100
-  AND r.status = 'ok'
-) AS referrals
+        COUNT(r.id) AS referrals
       FROM users u
-      LEFT JOIN users r ON r.parent_id = u.id
+      LEFT JOIN users r ON r.parent_id = u.id AND r.status = 'ok'
       WHERE u.status = 'ok'
       GROUP BY u.id
     `);
 
-   for (const user of users.rows) {
-  const referralCount = Number(user.referrals);
-  const commissionRate = getCommissionRate(referralCount);
-  const baseAmount = user.trading_wallet_amount;
+    const commissionRate = 1.6;
+    const commissionHistoryRecords = [];
 
-  const isEligibleForSelf = baseAmount >= 100;
+    for (const user of users.rows) {
+      const baseAmount = parseFloat(user.trading_wallet_amount);
+      const isEligibleForSelf = baseAmount >= 100;
 
-const commissionAmount = divide(
-  multiply(baseAmount, commissionRate),
-  100
-);
+      if (!isEligibleForSelf) continue;
 
-  let updatedBalance;
-  let walletType;
+      const commissionAmount = (baseAmount * commissionRate) / 100;
+      
+      let beforeBalance, afterBalance, walletType;
 
-  /* ===============================
-     ✅ 1. SELF COMMISSION
-  =============================== */
- if (isEligibleForSelf) {
-  if (user.auto_trade) {
-    const update = await client.query(
-      `UPDATE users 
-       SET trading_wallet_amount = trading_wallet_amount + $1
-       WHERE id = $2
-       RETURNING trading_wallet_amount`,
-      [commissionAmount, user.id]
-    );
+      /* ===============================
+         ✅ 1. SELF COMMISSION
+      =============================== */
+      if (user.auto_trade) {
+        // Get before balance
+        const beforeResult = await client.query(
+          `SELECT trading_wallet_amount FROM users WHERE id = $1`,
+          [user.id]
+        );
+        beforeBalance = parseFloat(beforeResult.rows[0].trading_wallet_amount);
+        
+        // Update trading wallet
+        const update = await client.query(
+          `UPDATE users 
+           SET trading_wallet_amount = trading_wallet_amount + $1
+           WHERE id = $2
+           RETURNING trading_wallet_amount`,
+          [commissionAmount, user.id]
+        );
+        
+        afterBalance = parseFloat(update.rows[0].trading_wallet_amount);
+        walletType = 'trading_wallet';
+        
+        // Add to history records
+        commissionHistoryRecords.push({
+          user_id: user.id,
+          commission_percent: commissionRate,
+          commission_amount: commissionAmount,
+          wallet_type: walletType,
+          before_balance: beforeBalance,
+          after_balance: afterBalance
+        });
 
-    updatedBalance = update.rows[0].trading_wallet_amount;
-    walletType = "Strategy Allocation Balance";
-  } else {
-    const update = await client.query(
-      `UPDATE users 
-       SET wallet_amount = wallet_amount + $1
-       WHERE id = $2
-       RETURNING wallet_amount`,
-      [commissionAmount, user.id]
-    );
+        // Notification
+        await client.query(
+          `INSERT INTO notifications 
+           (title, message, target_type, target_users, trading_wallet_balance)
+           VALUES ($1, $2, 'custom', $3, $4)`,
+          [
+            "Commission Added",
+            `$${commissionAmount.toFixed(2)} added to Strategy Allocation Balance (${commissionRate}%)`,
+            String(user.id),
+            afterBalance
+          ]
+        );
+      } else {
+        // Get before balance
+        const beforeResult = await client.query(
+          `SELECT wallet_amount FROM users WHERE id = $1`,
+          [user.id]
+        );
+        beforeBalance = parseFloat(beforeResult.rows[0].wallet_amount);
+        
+        // Update main wallet
+        const update = await client.query(
+          `UPDATE users 
+           SET wallet_amount = wallet_amount + $1
+           WHERE id = $2
+           RETURNING wallet_amount`,
+          [commissionAmount, user.id]
+        );
+        
+        afterBalance = parseFloat(update.rows[0].wallet_amount);
+        walletType = 'main_wallet';
+        
+        // Add to history records
+        commissionHistoryRecords.push({
+          user_id: user.id,
+          commission_percent: commissionRate,
+          commission_amount: commissionAmount,
+          wallet_type: walletType,
+          before_balance: beforeBalance,
+          after_balance: afterBalance
+        });
 
-    updatedBalance = update.rows[0].wallet_amount;
-    walletType = "Primary Credit Balance";
-  }
+        // Notification
+        await client.query(
+          `INSERT INTO notifications 
+           (title, message, target_type, target_users, main_wallet_balance)
+           VALUES ($1, $2, 'custom', $3, $4)`,
+          [
+            "Commission Added",
+            `$${commissionAmount.toFixed(2)} added to Primary Credit Balance (${commissionRate}%)`,
+            String(user.id),
+            afterBalance
+          ]
+        );
+      }
 
-  // notification
-  await client.query(
-    `INSERT INTO notifications 
-     (title, message, target_type, target_users, main_wallet_balance, trading_wallet_balance)
-     VALUES ($1, $2, 'custom', $3, $4, $5)`,
-    [
-      "Commission Added",
-      `$${commissionAmount} added to ${walletType}`,
-      String(user.id),
-      user.auto_trade ? null : updatedBalance,
-      user.auto_trade ? updatedBalance : null
-    ]
-  );
-}
+      /* ===============================
+         🔗 2. REFERRAL LEVEL COMMISSIONS (Only for auto_trade users)
+      =============================== */
+      if (user.auto_trade && commissionAmount > 0) {
+        const levels = [
+          { percent: 5, name: "Level 1" },
+          { percent: 2.5, name: "Level 2" },
+          { percent: 1.25, name: "Level 3" },
+          { percent: 0.75, name: "Level 4" },
+          { percent: 0.37, name: "Level 5" },
+        ];
 
-if (user.auto_trade && isEligibleForSelf && commissionAmount > 0) {
+        let currentUserId = user.id;
+        const visited = new Set();
 
-  const levels = [
-    { percent: 5 },
-    { percent: 2.5 },
-    { percent: 1.25 },
-    { percent: 0.75 },
-    { percent: 0.37 },
-  ];
+        for (let i = 0; i < levels.length; i++) {
+          if (visited.has(currentUserId)) break;
+          visited.add(currentUserId);
 
-  let currentUserId = user.id;
-  const visited = new Set();
+          const parentResult = await client.query(
+            `SELECT parent_id FROM users WHERE id = $1`,
+            [currentUserId]
+          );
 
-  for (let i = 0; i < levels.length; i++) {
-    if (visited.has(currentUserId)) break;
-    visited.add(currentUserId);
+          if (!parentResult.rowCount || !parentResult.rows[0].parent_id) break;
 
-    const res = await client.query(
-      `SELECT parent_id FROM users WHERE id = $1`,
-      [currentUserId]
-    );
+          const parentId = parentResult.rows[0].parent_id;
 
-    if (!res.rowCount || !res.rows[0].parent_id) break;
+          const parentInfo = await client.query(
+            `SELECT id, wallet_amount FROM users WHERE id = $1 AND status = 'ok'`,
+            [parentId]
+          );
 
-    const parentId = res.rows[0].parent_id;
+          if (!parentInfo.rowCount) {
+            currentUserId = parentId;
+            continue;
+          }
 
-    const parentRes = await client.query(
-      `SELECT id, wallet_amount FROM users WHERE id = $1`,
-      [parentId]
-    );
+          const parent = parentInfo.rows[0];
+          const reward = (commissionAmount * levels[i].percent) / 100;
 
-    if (!parentRes.rowCount) break;
+          if (reward <= 0) {
+            currentUserId = parent.id;
+            continue;
+          }
 
-    const parent = parentRes.rows[0];
+          // Get before balance
+          const beforeResult = await client.query(
+            `SELECT wallet_amount FROM users WHERE id = $1`,
+            [parent.id]
+          );
+          const beforeBalanceReferral = parseFloat(beforeResult.rows[0].wallet_amount);
+          
+          // Update parent's main wallet (referral commissions always go to main wallet)
+          const updateParent = await client.query(
+            `UPDATE users 
+             SET wallet_amount = wallet_amount + $1
+             WHERE id = $2
+             RETURNING wallet_amount`,
+            [reward, parent.id]
+          );
+          
+          const afterBalanceReferral = parseFloat(updateParent.rows[0].wallet_amount);
+          
+          // Add to history records
+          commissionHistoryRecords.push({
+            user_id: parent.id,
+            commission_percent: levels[i].percent,
+            commission_amount: reward,
+            wallet_type: 'main_wallet',
+            before_balance: beforeBalanceReferral,
+            after_balance: afterBalanceReferral
+          });
 
-    const reward = divide(
-      multiply(commissionAmount, levels[i].percent),
-      100
-    );
+          // Notification for referral commission
+          await client.query(
+            `INSERT INTO notifications 
+             (title, message, target_type, target_users, main_wallet_balance)
+             VALUES ($1, $2, 'custom', $3, $4)`,
+            [
+              "Referral Commission",
+              `You earned $${reward.toFixed(2)} from ${levels[i].name} referral (${levels[i].percent}%)`,
+              String(parent.id),
+              afterBalanceReferral
+            ]
+          );
 
-    if (reward <= 0) {
-      currentUserId = parent.id;
-      continue;
+          currentUserId = parent.id;
+        }
+      }
     }
 
-  const updateParent = await client.query(
-  `UPDATE users 
-   SET wallet_amount = wallet_amount + $1
-   WHERE id = $2
-   RETURNING wallet_amount`,
-  [reward, parent.id]
-);
+    /* ===============================
+       📝 INSERT ALL COMMISSION HISTORY
+    =============================== */
+    if (commissionHistoryRecords.length > 0) {
+      const historyQuery = `
+        INSERT INTO commission_history 
+        (user_id, commission_percent, commission_amount, wallet_type, before_balance, after_balance, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      `;
+      
+      for (const record of commissionHistoryRecords) {
+        await client.query(historyQuery, [
+          record.user_id,
+          record.commission_percent,
+          record.commission_amount,
+          record.wallet_type,
+          record.before_balance,
+          record.after_balance
+        ]);
+      }
+    }
 
-const parentBalance = updateParent.rows[0].wallet_amount;
-
-await client.query(
-  `INSERT INTO notifications 
-   (title, message, target_type, target_users, main_wallet_balance)
-   VALUES ($1, $2, 'custom', $3, $4)`,
-  [
-    "Referral Commission",
-    `You earned $${reward} from level ${i + 1} referral`,
-    String(parent.id),
-    parentBalance
-  ]
-);
-
-    currentUserId = parent.id;
-  }
-}
-
-  } 
-      /* ===============================
+    /* ===============================
        📝 SAVE LAST RUN TIME
     =============================== */
     await client.query(
@@ -266,16 +345,17 @@ await client.query(
     res.json({
       success: true,
       message: "Commission distributed successfully",
-      users: users.rowCount,
+      users_processed: users.rowCount,
+      commission_records: commissionHistoryRecords.length
     });
-   } catch (err) {
+
+  } catch (err) {
     await client.query("ROLLBACK");
     console.error("COMMISSION ERROR:", err);
-    res.status(500).json({ error: "Commission distribution failed" });
+    res.status(500).json({ error: "Commission distribution failed: " + err.message });
   } finally {
     client.release();
   }
-  
 });
 
 /* =========================================================
@@ -299,7 +379,7 @@ router.post("/apply-commission/:id", async (req, res) => {
         u.trading_wallet_amount,
         COUNT(r.id) AS referrals
       FROM users u
-      LEFT JOIN users r ON r.parent_id = u.id
+      LEFT JOIN users r ON r.parent_id = u.id AND r.status = 'ok'
       WHERE u.id = $1
       GROUP BY u.id
       `,
@@ -312,48 +392,101 @@ router.post("/apply-commission/:id", async (req, res) => {
 
     const user = userResult.rows[0];
     const referralCount = Number(user.referrals);
-
     const commissionRate = 1.6 + referralCount * 0.05;
+    const baseAmount = parseFloat(user.trading_wallet_amount);
 
-    const baseAmount = Number(user.trading_wallet_amount);
-
-    if (baseAmount <= 0) {
-      return res.json({ message: "No balance for commission" });
+    if (baseAmount < 100) {
+      return res.json({ 
+        success: false, 
+        message: "Minimum 100 required in trading wallet for commission" 
+      });
     }
 
-    const commissionAmount = divide(
-  multiply(baseAmount, commissionRate),
-  100
-);
+    const commissionAmount = (baseAmount * commissionRate) / 100;
+    
+    let beforeBalance, afterBalance, walletType;
 
-   if (user.auto_trade) {
-  await client.query(
-    `UPDATE users 
-     SET trading_wallet_amount = trading_wallet_amount + $1
-     WHERE id = $2`,
-    [commissionAmount, id]
-  );
-} else {
-  await client.query(
-    `UPDATE users 
-     SET wallet_amount = wallet_amount + $1
-     WHERE id = $2`,
-    [commissionAmount, id]
-  );
-}
-
-    // notification
-    await client.query(
-      `
-      INSERT INTO notifications (title, message, target_type, target_users)
-      VALUES ($1, $2, 'custom', $3)
-      `,
-      [
-        "Commission Added",
-        `$${commissionAmount} commission added at ${commissionRate.toFixed(2)}%`,
-        String(id),
-      ]
-    );
+    if (user.auto_trade) {
+      // Get before balance
+      const beforeResult = await client.query(
+        `SELECT trading_wallet_amount FROM users WHERE id = $1`,
+        [id]
+      );
+      beforeBalance = parseFloat(beforeResult.rows[0].trading_wallet_amount);
+      
+      // Update trading wallet
+      const update = await client.query(
+        `UPDATE users 
+         SET trading_wallet_amount = trading_wallet_amount + $1
+         WHERE id = $2
+         RETURNING trading_wallet_amount`,
+        [commissionAmount, id]
+      );
+      
+      afterBalance = parseFloat(update.rows[0].trading_wallet_amount);
+      walletType = 'trading_wallet';
+      
+      // Insert commission history
+      await client.query(
+        `INSERT INTO commission_history 
+         (user_id, commission_percent, commission_amount, wallet_type, before_balance, after_balance, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+        [id, commissionRate, commissionAmount, walletType, beforeBalance, afterBalance]
+      );
+      
+      // Notification
+      await client.query(
+        `INSERT INTO notifications 
+         (title, message, target_type, target_users, trading_wallet_balance)
+         VALUES ($1, $2, 'custom', $3, $4)`,
+        [
+          "Commission Added",
+          `$${commissionAmount.toFixed(2)} added to Strategy Allocation Balance (${commissionRate.toFixed(2)}%)`,
+          String(id),
+          afterBalance
+        ]
+      );
+    } else {
+      // Get before balance
+      const beforeResult = await client.query(
+        `SELECT wallet_amount FROM users WHERE id = $1`,
+        [id]
+      );
+      beforeBalance = parseFloat(beforeResult.rows[0].wallet_amount);
+      
+      // Update main wallet
+      const update = await client.query(
+        `UPDATE users 
+         SET wallet_amount = wallet_amount + $1
+         WHERE id = $2
+         RETURNING wallet_amount`,
+        [commissionAmount, id]
+      );
+      
+      afterBalance = parseFloat(update.rows[0].wallet_amount);
+      walletType = 'main_wallet';
+      
+      // Insert commission history
+      await client.query(
+        `INSERT INTO commission_history 
+         (user_id, commission_percent, commission_amount, wallet_type, before_balance, after_balance, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+        [id, commissionRate, commissionAmount, walletType, beforeBalance, afterBalance]
+      );
+      
+      // Notification
+      await client.query(
+        `INSERT INTO notifications 
+         (title, message, target_type, target_users, main_wallet_balance)
+         VALUES ($1, $2, 'custom', $3, $4)`,
+        [
+          "Commission Added",
+          `$${commissionAmount.toFixed(2)} added to Primary Credit Balance (${commissionRate.toFixed(2)}%)`,
+          String(id),
+          afterBalance
+        ]
+      );
+    }
 
     await client.query("COMMIT");
 
@@ -361,6 +494,9 @@ router.post("/apply-commission/:id", async (req, res) => {
       success: true,
       commission: commissionAmount,
       rate: commissionRate,
+      wallet_type: walletType,
+      before_balance: beforeBalance,
+      after_balance: afterBalance
     });
 
   } catch (err) {
@@ -372,6 +508,79 @@ router.post("/apply-commission/:id", async (req, res) => {
   }
 });
 
+/* =========================================================
+   GET COMMISSION HISTORY FOR USER
+   GET /api/system/commission-history/:userId
+   ========================================================= */
+router.get("/commission-history/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const result = await pool.query(
+      `
+      SELECT 
+        id,
+        commission_percent,
+        commission_amount,
+        wallet_type,
+        before_balance,
+        after_balance,
+        created_at
+      FROM commission_history
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      `,
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      history: result.rows
+    });
+
+  } catch (err) {
+    console.error("COMMISSION HISTORY ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch commission history" });
+  }
+});
+
+/* =========================================================
+   GET COMMISSION HISTORY FOR SPECIFIC USER
+   GET /api/system/commission-history/user/:userId
+   ========================================================= */
+router.get("/commission-history/user/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const result = await pool.query(
+      `
+      SELECT 
+        id,
+        commission_percent,
+        commission_amount,
+        wallet_type,
+        before_balance,
+        after_balance,
+        created_at
+      FROM commission_history
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT 500
+      `,
+      [userId]
+    );
+
+    res.json({
+      success: true,
+      count: result.rowCount,
+      history: result.rows
+    });
+
+  } catch (err) {
+    console.error("USER COMMISSION HISTORY ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch user commission history" });
+  }
+});
 /* =========================================
    CHECK COMMISSION LOCK
    GET /api/system/commission-status
@@ -391,8 +600,10 @@ router.get("/commission-status", async (req, res) => {
 
     const diff = (now - lastRun) / (1000 * 60 * 60);
 
-    if (diff < 24) {
-      const remaining = (24 - diff).toFixed(2);
+    // if (diff < 24) {
+    //   const remaining = (24 - diff).toFixed(2);
+    if (diff < 16) {
+  const remaining = (16 - diff).toFixed(2);
       return res.json({
         locked: true,
         remaining,
@@ -429,6 +640,43 @@ router.get("/auto-trade/:id", async (req, res) => {
   }
 });
 
+/* =========================================================
+   GET ALL COMMISSION HISTORY (ADMIN)
+   GET /api/system/commission-history/all
+   ========================================================= */
+router.get("/commission-history/all", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT 
+        ch.id,
+        ch.user_id,
+        u.name as user_name,
+        u.email as user_email,
+        ch.commission_percent,
+        ch.commission_amount,
+        ch.wallet_type,
+        ch.before_balance,
+        ch.after_balance,
+        ch.created_at
+      FROM commission_history ch
+      JOIN users u ON u.id = ch.user_id
+      ORDER BY ch.created_at DESC
+      LIMIT 1000
+      `
+    );
+
+    res.json({
+      success: true,
+      count: result.rowCount,
+      history: result.rows
+    });
+
+  } catch (err) {
+    console.error("ALL COMMISSION HISTORY ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch commission history" });
+  }
+});
 
 /* =========================================================
    TOGGLE AUTO TRADE
