@@ -210,12 +210,35 @@ router.get("/profile/:id", async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT 
-          u.*,
+      `
+      SELECT
+          u.id,
+          u.name,
+          u.phone,
+          u.email,
+          u.dob,
+          u.gender,
+          u.country_code,
+          u.is_verified,
+          u.created_at,
+
+          u.wallet_address,
+          u.wallet_amount,
+          u.trading_wallet_amount,
+
+          u.referral_code,
+          u.parent_id,
+
+          u.auto_trade,
+          u.status,
+          u.kyc_verify,
+
           p.referral_code AS parent_referral_code
-       FROM users u
-       LEFT JOIN users p ON u.parent_id = p.id
-       WHERE u.id = $1`,
+
+      FROM users u
+      LEFT JOIN users p ON u.parent_id = p.id
+      WHERE u.id = $1
+      `,
       [id]
     );
 
