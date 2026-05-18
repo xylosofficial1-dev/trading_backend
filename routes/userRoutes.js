@@ -315,6 +315,8 @@ res.status(500).json({
 
 // ================= PROFILE IMAGE ONLY =================
 
+// ================= PROFILE IMAGE ONLY =================
+
 router.get("/profile/image/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -338,6 +340,7 @@ router.get("/profile/image/:id", async (req, res) => {
     }
 
     res.set("Content-Type", "image/jpeg");
+
     res.send(result.rows[0].profile_image);
 
   } catch (err) {
@@ -374,21 +377,29 @@ router.get("/profile/:id", async (req, res) => {
         u.country_code,
         u.is_verified,
         u.created_at,
+
         u.mpin_hash,
         u.last_added_amount,
+
         u.wallet_address,
         u.wallet_amount,
         u.trading_wallet_amount,
         u.tw_to_mw,
+
         u.status,
         u.notifications_seen_at,
+
         u.referral_code,
         u.parent_id,
+
         u.auto_trade,
+
         u.commission_start_at,
         u.next_commission_at,
+
         u.is_online,
         u.last_seen,
+
         u.kyc_verify,
 
         p.referral_code AS parent_referral_code
@@ -396,7 +407,7 @@ router.get("/profile/:id", async (req, res) => {
       FROM users u
 
       LEFT JOIN users p
-        ON u.parent_id = p.id
+      ON u.parent_id = p.id
 
       WHERE u.id = $1
       `,
