@@ -310,6 +310,37 @@ res.status(500).json({
 //   }
 // });
 
+
+// Get profile image only
+
+router.get("/profile/image/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `SELECT profile_photo
+       FROM users
+       WHERE id = $1`,
+      [id]
+    );
+
+    if (
+      result.rows.length === 0 ||
+      !result.rows[0].profile_photo
+    ) {
+      return res.status(404).send("No image");
+    }
+
+    res.set("Content-Type", "image/jpeg");
+    res.send(result.rows[0].profile_photo);
+
+  } catch (err) {
+    console.log(err);
+    res.status(500).send("Server error");
+  }
+});
+
+
 router.get("/profile/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
@@ -327,6 +358,7 @@ router.get("/profile/:id", async (req, res) => {
         u.phone,
         u.wallet_amount,
         u.trading_wallet_amount,
+        u.wallet_address,
         u.referral_code,
         u.parent_id,
         u.created_at,
