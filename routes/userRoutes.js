@@ -279,7 +279,7 @@ res.status(500).json({
 });
   }
 });
- 
+
 // router.get("/profile/:id", async (req, res) => {
 //   try {
 //     const id = parseInt(req.params.id);
@@ -309,49 +309,6 @@ res.status(500).json({
 //     res.status(500).json({ error: "Server error" });
 //   }
 // });
-
-
-// Get profile image only
-
-// ================= PROFILE IMAGE ONLY =================
-
-// ================= PROFILE IMAGE ONLY =================
-
-router.get("/profile/image/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const result = await pool.query(
-      `
-      SELECT profile_image
-      FROM users
-      WHERE id = $1
-      `,
-      [id]
-    );
-
-    if (
-      result.rows.length === 0 ||
-      !result.rows[0].profile_image
-    ) {
-      return res.status(404).json({
-        error: "No image found",
-      });
-    }
-
-    res.set("Content-Type", "image/jpeg");
-
-    res.send(result.rows[0].profile_image);
-
-  } catch (err) {
-    console.error("PROFILE IMAGE ERROR:", err);
-
-    res.status(500).json({
-      error: "Server error",
-    });
-  }
-});
-
 
 // ================= PROFILE DATA (WITHOUT IMAGE) =================
 
@@ -384,8 +341,8 @@ router.get("/profile/:id", async (req, res) => {
         u.wallet_address,
         u.wallet_amount,
         u.trading_wallet_amount,
-        u.tw_to_mw,
 
+        u.tw_to_mw,
         u.status,
         u.notifications_seen_at,
 
@@ -423,53 +380,86 @@ router.get("/profile/:id", async (req, res) => {
     res.json(result.rows[0]);
 
   } catch (err) {
-    console.error("PROFILE ERROR:", err);
+
+    console.error("PROFILE ERROR:", err.message);
+    console.error(err);
 
     res.status(500).json({
-      error: "Server error",
+      error: err.message,
     });
   }
 });
 
+router.post("/profile/upload-image/:id", upload.single("image"), async (req, res) => {
+  try {
+    const buffer = req.file.buffer;
+    const { id } = req.params;
 
-// ================= UPLOAD PROFILE IMAGE =================
+    await pool.query("UPDATE users SET profile_image=$1 WHERE id=$2", [buffer, id]);
 
-router.post(
-  "/profile/upload-image/:id",
-  upload.single("image"),
-  async (req, res) => {
-    try {
-      const { id } = req.params;
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: "Image upload failed" });
+  }
+});
 
-      if (!req.file) {
-        return res.status(400).json({
-          error: "No image uploaded",
-        });
-      }
+// ================= PROFILE IMAGE ONLY =================
 
-      await pool.query(
-        `
-        UPDATE users
-        SET profile_image = $1
-        WHERE id = $2
-        `,
-        [req.file.buffer, id]
-      );
+router.get("/profile/image/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
 
-      res.json({
-        success: true,
-        message: "Profile image uploaded successfully",
-      });
+    const result = await pool.query(
+      `
+      SELECT profile_image
+      FROM users
+      WHERE id = $1
+      `,
+      [id]
+    );
 
-    } catch (err) {
-      console.error("UPLOAD IMAGE ERROR:", err);
-
-      res.status(500).json({
-        error: "Image upload failed",
+    if (
+      result.rows.length === 0 ||
+      !result.rows[0].profile_image
+    ) {
+      return res.status(404).json({
+        error: "No image found",
       });
     }
+
+    res.set("Content-Type", "image/jpeg");
+
+    res.send(result.rows[0].profile_image);
+
+  } catch (err) {
+
+    console.error("PROFILE IMAGE ERROR:", err.message);
+
+    res.status(500).json({
+      error: err.message,
+    });
   }
-);
+});
+
+/* ================= UPDATE PROFILE ================= */
+router.put("/profile/update/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, dob, gender } = req.body;
+
+    await pool.query(
+      `UPDATE users 
+       SET name=$1, dob=$2, gender=$3
+       WHERE id=$4`,
+      [name, dob, gender, id]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Profile update failed" });
+  }
+});
 
 /* ================= GET ALL USERS ================= */
 router.get("/all", async (req, res) => {
