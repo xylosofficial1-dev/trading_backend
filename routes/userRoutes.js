@@ -336,7 +336,6 @@ router.get("/profile/:id", async (req, res) => {
         u.created_at,
 
         u.mpin_hash,
-        u.last_added_amount,
 
         u.wallet_address,
         u.wallet_amount,
