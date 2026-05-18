@@ -279,6 +279,36 @@ res.status(500).json({
 });
   }
 });
+ 
+// router.get("/profile/:id", async (req, res) => {
+//   try {
+//     const id = parseInt(req.params.id);
+
+//     if (!id) {
+//       return res.status(400).json({ error: "Invalid user id" });
+//     }
+
+//     const result = await pool.query(
+//       `SELECT 
+//           u.*,
+//           p.referral_code AS parent_referral_code
+//        FROM users u
+//        LEFT JOIN users p ON u.parent_id = p.id
+//        WHERE u.id = $1`,
+//       [id]
+//     );
+
+//     if (!result.rows.length) {
+//       return res.status(404).json({ error: "User not found" });
+//     }
+
+//     res.json(result.rows[0]);
+
+//   } catch (err) {
+//     console.error("PROFILE ERROR:", err);
+//     res.status(500).json({ error: "Server error" });
+//   }
+// });
 
 router.get("/profile/:id", async (req, res) => {
   try {
@@ -289,12 +319,20 @@ router.get("/profile/:id", async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT 
-          u.*,
-          p.referral_code AS parent_referral_code
-       FROM users u
-       LEFT JOIN users p ON u.parent_id = p.id
-       WHERE u.id = $1`,
+      `
+      SELECT 
+        to_jsonb(u)
+          - 'profile_photo'
+          - 'kyc_document'
+          - 'screenshot'
+        AS user_data,
+
+        p.referral_code AS parent_referral_code
+
+      FROM users u
+      LEFT JOIN users p ON u.parent_id = p.id
+      WHERE u.id = $1
+      `,
       [id]
     );
 
@@ -302,14 +340,18 @@ router.get("/profile/:id", async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    res.json(result.rows[0]);
+    const row = result.rows[0];
+
+    res.json({
+      ...row.user_data,
+      parent_referral_code: row.parent_referral_code,
+    });
 
   } catch (err) {
     console.error("PROFILE ERROR:", err);
     res.status(500).json({ error: "Server error" });
   }
 });
-
 router.post("/profile/upload-image/:id", upload.single("image"), async (req, res) => {
   try {
     const buffer = req.file.buffer;
