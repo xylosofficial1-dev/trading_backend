@@ -346,40 +346,65 @@ router.get("/profile/:id", async (req, res) => {
     const id = parseInt(req.params.id);
 
     if (!id) {
-      return res.status(400).json({ error: "Invalid user id" });
+      return res.status(400).json({
+        error: "Invalid user id",
+      });
     }
 
     const result = await pool.query(
       `
-      SELECT 
+      SELECT
         u.id,
         u.name,
-        u.email,
         u.phone,
+        u.email,
+        u.dob,
+        u.gender,
+        u.country_code,
+        u.is_verified,
+        u.created_at,
+        u.mpin_hash,
+        u.last_added_amount,
+        u.wallet_address,
         u.wallet_amount,
         u.trading_wallet_amount,
-        u.wallet_address,
+        u.tw_to_mw,
+        u.status,
+        u.notifications_seen_at,
         u.referral_code,
         u.parent_id,
-        u.created_at,
+        u.auto_trade,
+        u.commission_start_at,
+        u.next_commission_at,
+        u.is_online,
+        u.last_seen,
+        u.kyc_verify,
+
         p.referral_code AS parent_referral_code
 
       FROM users u
-      LEFT JOIN users p ON u.parent_id = p.id
+      LEFT JOIN users p
+        ON u.parent_id = p.id
+
       WHERE u.id = $1
       `,
       [id]
     );
 
     if (!result.rows.length) {
-      return res.status(404).json({ error: "User not found" });
+      return res.status(404).json({
+        error: "User not found",
+      });
     }
 
     res.json(result.rows[0]);
 
   } catch (err) {
     console.error("PROFILE ERROR:", err);
-    res.status(500).json({ error: "Server error" });
+
+    res.status(500).json({
+      error: "Server error",
+    });
   }
 });
 router.post("/profile/upload-image/:id", upload.single("image"), async (req, res) => {
