@@ -321,12 +321,15 @@ router.get("/profile/:id", async (req, res) => {
     const result = await pool.query(
       `
       SELECT 
-        to_jsonb(u)
-          - 'profile_photo'
-          - 'kyc_document'
-          - 'screenshot'
-        AS user_data,
-
+        u.id,
+        u.name,
+        u.email,
+        u.phone,
+        u.wallet_amount,
+        u.trading_wallet_amount,
+        u.referral_code,
+        u.parent_id,
+        u.created_at,
         p.referral_code AS parent_referral_code
 
       FROM users u
@@ -340,12 +343,7 @@ router.get("/profile/:id", async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    const row = result.rows[0];
-
-    res.json({
-      ...row.user_data,
-      parent_referral_code: row.parent_referral_code,
-    });
+    res.json(result.rows[0]);
 
   } catch (err) {
     console.error("PROFILE ERROR:", err);
