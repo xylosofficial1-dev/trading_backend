@@ -313,33 +313,44 @@ res.status(500).json({
 
 // Get profile image only
 
+// ================= PROFILE IMAGE ONLY =================
+
 router.get("/profile/image/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
     const result = await pool.query(
-      `SELECT profile_photo
-       FROM users
-       WHERE id = $1`,
+      `
+      SELECT profile_image
+      FROM users
+      WHERE id = $1
+      `,
       [id]
     );
 
     if (
       result.rows.length === 0 ||
-      !result.rows[0].profile_photo
+      !result.rows[0].profile_image
     ) {
-      return res.status(404).send("No image");
+      return res.status(404).json({
+        error: "No image found",
+      });
     }
 
     res.set("Content-Type", "image/jpeg");
-    res.send(result.rows[0].profile_photo);
+    res.send(result.rows[0].profile_image);
 
   } catch (err) {
-    console.log(err);
-    res.status(500).send("Server error");
+    console.error("PROFILE IMAGE ERROR:", err);
+
+    res.status(500).json({
+      error: "Server error",
+    });
   }
 });
 
+
+// ================= PROFILE DATA (WITHOUT IMAGE) =================
 
 router.get("/profile/:id", async (req, res) => {
   try {
@@ -383,6 +394,7 @@ router.get("/profile/:id", async (req, res) => {
         p.referral_code AS parent_referral_code
 
       FROM users u
+
       LEFT JOIN users p
         ON u.parent_id = p.id
 
@@ -407,38 +419,46 @@ router.get("/profile/:id", async (req, res) => {
     });
   }
 });
-router.post("/profile/upload-image/:id", upload.single("image"), async (req, res) => {
-  try {
-    const buffer = req.file.buffer;
-    const { id } = req.params;
 
-    await pool.query("UPDATE users SET profile_image=$1 WHERE id=$2", [buffer, id]);
 
-    res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: "Image upload failed" });
+// ================= UPLOAD PROFILE IMAGE =================
+
+router.post(
+  "/profile/upload-image/:id",
+  upload.single("image"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      if (!req.file) {
+        return res.status(400).json({
+          error: "No image uploaded",
+        });
+      }
+
+      await pool.query(
+        `
+        UPDATE users
+        SET profile_image = $1
+        WHERE id = $2
+        `,
+        [req.file.buffer, id]
+      );
+
+      res.json({
+        success: true,
+        message: "Profile image uploaded successfully",
+      });
+
+    } catch (err) {
+      console.error("UPLOAD IMAGE ERROR:", err);
+
+      res.status(500).json({
+        error: "Image upload failed",
+      });
+    }
   }
-});
-
-/* ================= UPDATE PROFILE ================= */
-router.put("/profile/update/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { name, dob, gender } = req.body;
-
-    await pool.query(
-      `UPDATE users 
-       SET name=$1, dob=$2, gender=$3
-       WHERE id=$4`,
-      [name, dob, gender, id]
-    );
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Profile update failed" });
-  }
-});
+);
 
 /* ================= GET ALL USERS ================= */
 router.get("/all", async (req, res) => {
