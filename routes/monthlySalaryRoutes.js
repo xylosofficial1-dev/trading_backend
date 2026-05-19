@@ -7,138 +7,236 @@ const getDirectBusiness = require("../utils/directBusinessCalculator");
 const { getSalary, rules } = require("../utils/monthlySalaryRules");
 
 router.post("/claim/:userId", async (req, res) => {
-  const { userId } = req.params;
+  const client = await pool.connect();
 
   try {
+
+    await client.query("BEGIN");
+
+    const userId = parseInt(req.params.userId);
+
+    if (!userId || isNaN(userId)) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        success: false,
+        message: "Invalid user id"
+      });
+    }
+
+    // =========================
+    // CURRENT BUSINESS
+    // =========================
+
     const business = await getDirectBusiness(userId);
 
-    // 🔹 Get last claim
-    const lastClaim = await pool.query(
-      `SELECT business_level, claimed_at
-       FROM monthly_salary_claims
-       WHERE user_id=$1
-       ORDER BY claimed_at DESC
-       LIMIT 1`,
+    const currentRule = rules
+      .filter(r => business >= r.business)
+      .pop();
+
+    if (!currentRule) {
+
+      await client.query("ROLLBACK");
+
+      return res.json({
+        success: false,
+        message: "Build $1000 direct business"
+      });
+    }
+
+    // =========================
+    // GET STATUS
+    // =========================
+
+    const statusResult = await client.query(
+      `
+      SELECT *
+      FROM monthly_salary_status
+      WHERE user_id = $1
+      FOR UPDATE
+      `,
       [userId]
     );
 
-    let lastLevel = 0;
+    if (statusResult.rowCount === 0) {
 
-    if (lastClaim.rowCount > 0) {
-  lastLevel = Number(lastClaim.rows[0].business_level);
+      await client.query("ROLLBACK");
 
-  const lastDate = new Date(lastClaim.rows[0].claimed_at);
-  const nextDate = new Date(lastDate);
-  nextDate.setDate(nextDate.getDate() + 30);
-
-  const now = new Date();
-
-  // 🔥 Get current level
-  const current = rules.filter(r => business >= r.business).pop();
-
-  // ✅ CONDITION 1: Level upgraded → allow claim instantly
-  if (current && current.business > lastLevel) {
-    // allow claim (skip 30 days)
-  }
-  // ❌ CONDITION 2: No level upgrade → enforce 30 days
-  else if (now < nextDate) {
-    const remaining = Math.ceil(
-      (nextDate - now) / (1000 * 60 * 60 * 24)
-    );
-
-    return res.json({
-      success: false,
-      canClaim: false,
-      message: "Claim not available yet",
-      remainingDays: remaining
-    });
-  }
-}
-
-    // 🔹 Get current level based on business
-    const current = rules.filter(r => business >= r.business).pop();
-
-    if (!current) {
       return res.json({
         success: false,
-        message: "No salary level reached"
+        message: "Reward not initialized"
       });
     }
 
-    // 🔥 CORE FIXED LOGIC
-    const allEligibleLevels = rules.filter(r => business >= r.business);
+    const status = statusResult.rows[0];
 
-    let payoutLevels;
+    const now = new Date();
 
-    if (lastLevel === 0) {
-      // ✅ First claim → give ALL pending levels
-      payoutLevels = allEligibleLevels;
-    } else {
-      // ✅ Only give levels NOT yet claimed
-      payoutLevels = allEligibleLevels.filter(
-        r => r.business > lastLevel
-      );
-    }
+    const nextClaimAt =
+      new Date(status.next_claim_at);
 
-    if (payoutLevels.length === 0) {
+    // =========================
+    // CLAIM CHECK
+    // =========================
+
+    if (now < nextClaimAt) {
+
+      await client.query("ROLLBACK");
+
       return res.json({
         success: false,
-        message: "Nothing new to claim"
+        message: "Claim not available yet"
       });
     }
 
-    // ✅ Calculate payout
-    const payout = payoutLevels.reduce(
-      (sum, r) => sum + r.salary,
-      0
+    // =========================
+    // CREDIT WALLET
+    // =========================
+
+    const salary =
+      Number(status.current_salary);
+
+    await client.query(
+      `
+      UPDATE users
+      SET wallet_amount =
+      COALESCE(wallet_amount,0) + $1
+      WHERE id = $2
+      `,
+      [salary, userId]
     );
 
-    const highestLevel = current.business;
+    // =========================
+    // SAVE CLAIM HISTORY
+    // =========================
 
-    // ✅ Update wallet
-    await pool.query(
-      `UPDATE users
-       SET wallet_amount = wallet_amount + $1
-       WHERE id=$2`,
-      [payout, userId]
+    await client.query(
+      `
+      INSERT INTO monthly_salary_claims
+      (
+        user_id,
+        salary_amount,
+        business_level
+      )
+      VALUES ($1,$2,$3)
+      `,
+      [
+        userId,
+        salary,
+        status.current_business_level
+      ]
     );
 
-    // ✅ Insert claim history
-    await pool.query(
-      `INSERT INTO monthly_salary_claims
-       (user_id, salary_amount, business_level)
-       VALUES ($1,$2,$3)`,
-      [userId, payout, highestLevel]
+    // =========================
+    // IMPORTANT FIX
+    // NEXT DATE FROM PREVIOUS DATE
+    // NOT FROM TODAY
+    // =========================
+
+    const nextDate = new Date(
+      status.next_claim_at
     );
 
-    // ✅ Notification
-    await pool.query(
-      `INSERT INTO notifications (title, message, target_type, target_users)
-       VALUES ($1, $2, $3, $4)`,
+    nextDate.setDate(
+      nextDate.getDate() + 30
+    );
+
+    // =========================
+    // CHECK LEVEL UPGRADE
+    // =========================
+
+    let updatedBusiness =
+      status.current_business_level;
+
+    let updatedSalary =
+      status.current_salary;
+
+    if (
+      Number(currentRule.business) >
+      Number(status.current_business_level)
+    ) {
+
+      updatedBusiness =
+        currentRule.business;
+
+      updatedSalary =
+        currentRule.salary;
+    }
+
+    // =========================
+    // UPDATE STATUS
+    // =========================
+
+    await client.query(
+      `
+      UPDATE monthly_salary_status
+      SET
+        current_business_level = $1,
+        current_salary = $2,
+        next_claim_at = $3
+      WHERE user_id = $4
+      `,
+      [
+        updatedBusiness,
+        updatedSalary,
+        nextDate,
+        userId
+      ]
+    );
+
+    // =========================
+    // NOTIFICATION
+    // =========================
+
+    await client.query(
+      `
+      INSERT INTO notifications
+      (
+        title,
+        message,
+        target_type,
+        target_users
+      )
+      VALUES ($1,$2,$3,$4)
+      `,
       [
         "Monthly Reward Claimed 🎉",
-        `🔥 $${payout} credited to your Primary Credit Balance!`,
+        `🔥 $${salary} credited to wallet`,
         "custom",
         userId.toString()
       ]
     );
 
+    await client.query("COMMIT");
+
     return res.json({
       success: true,
-      salary: payout
+      amount: salary,
+      nextClaimAt: nextDate
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({
+
+    await client.query("ROLLBACK");
+
+    console.log(err);
+
+    return res.status(500).json({
+      success: false,
       error: "Server error"
     });
+
+  } finally {
+
+    client.release();
+
   }
 });
 
 router.get("/status/:userId", async (req, res) => {
   try {
-    const userId = req.params.userId;
+
+    const userId = parseInt(req.params.userId);
 
     const business = await getDirectBusiness(userId);
 
@@ -153,30 +251,68 @@ router.get("/status/:userId", async (req, res) => {
       });
     }
 
-    // ACTIVE STATUS
-    let status = await pool.query(
-      `SELECT *
-       FROM monthly_salary_status
-       WHERE user_id=$1`,
+    let statusResult = await pool.query(
+      `
+      SELECT *
+      FROM monthly_salary_status
+      WHERE user_id = $1
+      `,
       [userId]
     );
 
-    // FIRST TIME
-    if (status.rowCount === 0) {
+    // =====================================
+    // FIRST TIME USER
+    // =====================================
 
-      const nextClaim = new Date();
-      nextClaim.setDate(nextClaim.getDate() + 30);
+    if (statusResult.rowCount === 0) {
+
+      // check old claim history first
+
+      const oldClaim = await pool.query(
+        `
+        SELECT claimed_at
+        FROM monthly_salary_claims
+        WHERE user_id = $1
+        ORDER BY claimed_at DESC
+        LIMIT 1
+        `,
+        [userId]
+      );
+
+      let nextClaim;
+
+      // existing live user
+      if (oldClaim.rowCount > 0) {
+
+        nextClaim = new Date(
+          oldClaim.rows[0].claimed_at
+        );
+
+        nextClaim.setDate(
+          nextClaim.getDate() + 30
+        );
+
+      } else {
+
+        // fresh user
+        nextClaim = new Date();
+
+        nextClaim.setDate(
+          nextClaim.getDate() + 30
+        );
+      }
 
       await pool.query(
-        `INSERT INTO monthly_salary_status
-         (
-           user_id,
-           current_business_level,
-           current_salary,
-           level_started_at,
-           next_claim_at
-         )
-         VALUES ($1,$2,$3,NOW(),$4)`,
+        `
+        INSERT INTO monthly_salary_status (
+          user_id,
+          current_business_level,
+          current_salary,
+          level_started_at,
+          next_claim_at
+        )
+        VALUES ($1,$2,$3,NOW(),$4)
+        `,
         [
           userId,
           currentRule.business,
@@ -185,49 +321,73 @@ router.get("/status/:userId", async (req, res) => {
         ]
       );
 
+      const now = new Date();
+
+      if (now >= nextClaim) {
+        return res.json({
+          canClaim: true,
+          remainingTime: ""
+        });
+      }
+
+      const diff = nextClaim - now;
+
+      const days = Math.ceil(
+        diff / (1000 * 60 * 60 * 24)
+      );
+
       return res.json({
         canClaim: false,
-        remainingTime: "30 days"
+        remainingTime: `${days} days`
       });
     }
 
-    status = status.rows[0];
+    let status = statusResult.rows[0];
 
+    // =====================================
     // LEVEL UPGRADE
+    // DO NOT RESET TIMER
+    // =====================================
+
     if (
       Number(currentRule.business) >
       Number(status.current_business_level)
     ) {
 
-      const nextClaim = new Date();
-      nextClaim.setDate(nextClaim.getDate() + 30);
-
       await pool.query(
-        `UPDATE monthly_salary_status
-         SET
-           current_business_level=$1,
-           current_salary=$2,
-           level_started_at=NOW(),
-           next_claim_at=$3
-         WHERE user_id=$4`,
+        `
+        UPDATE monthly_salary_status
+        SET
+          current_business_level = $1,
+          current_salary = $2
+        WHERE user_id = $3
+        `,
         [
           currentRule.business,
           currentRule.salary,
-          nextClaim,
           userId
         ]
       );
 
-      return res.json({
-        canClaim: false,
-        remainingTime: "30 days"
-      });
+      status.current_business_level =
+        currentRule.business;
+
+      status.current_salary =
+        currentRule.salary;
     }
 
+    // =====================================
+    // NORMAL TIMER
+    // =====================================
+
     const now = new Date();
-    const nextClaim = new Date(status.next_claim_at);
+
+    const nextClaim = new Date(
+      status.next_claim_at
+    );
 
     if (now >= nextClaim) {
+
       return res.json({
         canClaim: true,
         remainingTime: ""
@@ -236,17 +396,24 @@ router.get("/status/:userId", async (req, res) => {
 
     const diff = nextClaim - now;
 
-    const days = Math.ceil(
+    const days = Math.floor(
       diff / (1000 * 60 * 60 * 24)
+    );
+
+    const hours = Math.floor(
+      (diff % (1000 * 60 * 60 * 24)) /
+      (1000 * 60 * 60)
     );
 
     return res.json({
       canClaim: false,
-      remainingTime: `${days} days`
+      remainingTime: `${days}d ${hours}h`
     });
 
   } catch (err) {
+
     console.log(err);
+
     res.status(500).json({
       error: "Server error"
     });
@@ -742,7 +909,7 @@ router.get("/dashboard/:userId", async (req, res) => {
 
     console.log(err);
 
-    res.status(500).json({
+    res.status(500).json({ 
       success: false,
       error: "Server error"
     });

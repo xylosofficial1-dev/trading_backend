@@ -8,7 +8,7 @@ const rules = [
   { business: 100000, salary: 12000 },
   { business: 250000, salary: 26000 },
   { business: 500000, salary: 50000 },
-  { business: 1000000, salary: 1000000 }
+  { business: 1000000, salary: 100000 }
 ];
 
 function getSalary(business) {

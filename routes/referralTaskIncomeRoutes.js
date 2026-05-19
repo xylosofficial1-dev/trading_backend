@@ -293,6 +293,7 @@ router.get("/engagement-network/:parentId", async (req, res) => {
       `
       SELECT
         id,
+        name,
         email,
         phone,
         trading_wallet_amount
