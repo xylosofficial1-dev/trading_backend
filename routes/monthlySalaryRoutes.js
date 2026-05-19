@@ -233,6 +233,45 @@ router.post("/claim/:userId", async (req, res) => {
   }
 });
 
+// GET ALL MONTHLY SALARY STATUS DATA
+router.get("/all-status", async (req, res) => {
+  try {
+
+    const result = await pool.query(
+      `
+      SELECT
+        s.user_id,
+        u.name,
+        u.phone,
+        s.current_business_level,
+        s.current_salary,
+        s.level_started_at,
+        s.next_claim_at
+      FROM monthly_salary_status s
+      LEFT JOIN users u
+        ON u.id = s.user_id
+      ORDER BY s.user_id ASC
+      `
+    );
+
+    res.json({
+      success: true,
+      total: result.rowCount,
+      data: result.rows
+    });
+
+  } catch (err) {
+
+    console.log(err);
+
+    res.status(500).json({
+      success: false,
+      error: "Server error"
+    });
+
+  }
+});
+
 router.get("/status/:userId", async (req, res) => {
   try {
 
