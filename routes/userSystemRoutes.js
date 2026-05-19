@@ -1,3 +1,4 @@
+// backend/routes/userSystemRoutes.js
 const express = require("express");
 const router = express.Router();
 const pool = require("../db/db");
@@ -512,13 +513,46 @@ router.post("/apply-commission/:id", async (req, res) => {
    GET COMMISSION HISTORY FOR USER
    GET /api/system/commission-history/:userId
    ========================================================= */
+// router.get("/commission-history/:userId", async (req, res) => {
+//   try {
+//     const { userId } = req.params;
+
+//     const result = await pool.query(
+//       `
+//       SELECT 
+//         id,
+//         commission_percent,
+//         commission_amount,
+//         wallet_type,
+//         before_balance,
+//         after_balance,
+//         created_at
+//       FROM commission_history
+//       WHERE user_id = $1
+//       ORDER BY created_at DESC
+//       `,
+//       [userId]
+//     );
+
+//     res.json({
+//       success: true,
+//       history: result.rows
+//     });
+
+//   } catch (err) {
+//     console.error("COMMISSION HISTORY ERROR:", err);
+//     res.status(500).json({ error: "Failed to fetch commission history" });
+//   }
+// });
+
+
 router.get("/commission-history/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const result = await pool.query(
+    const history = await pool.query(
       `
-      SELECT 
+      SELECT
         id,
         commission_percent,
         commission_amount,
@@ -535,12 +569,16 @@ router.get("/commission-history/:userId", async (req, res) => {
 
     res.json({
       success: true,
-      history: result.rows
+      history: history.rows,
     });
 
   } catch (err) {
-    console.error("COMMISSION HISTORY ERROR:", err);
-    res.status(500).json({ error: "Failed to fetch commission history" });
+    console.log(err);
+
+    res.status(500).json({
+      success: false,
+      error: "Server error",
+    });
   }
 });
 
