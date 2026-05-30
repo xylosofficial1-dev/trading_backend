@@ -1147,10 +1147,19 @@ router.post("/distribute-commission", async (req, res) => {
     });
 
   } catch (err) {
-    await client.query("ROLLBACK");
-    console.error("COMMISSION ERROR:", err);
-    res.status(500).json({ error: "Commission distribution failed: " + err.message });
-  } finally {
+  await client.query("ROLLBACK");
+
+  console.error("COMMISSION ERROR FULL:", err);
+
+  return res.status(500).json({
+    success: false,
+    message: err.message,
+    detail: err.detail,
+    hint: err.hint,
+    code: err.code,
+    stack: err.stack
+  });
+} finally {
     client.release();
   }
 });

@@ -12,20 +12,20 @@ const rewardRules = [
 { deposit:100, referrals:85, reward:755 },
 { deposit:100, referrals:185, reward:1755 },
 
-{ deposit:350, referrals:10, reward:300 },
-{ deposit:350, referrals:35, reward:1000 },
-{ deposit:350, referrals:85, reward:2700 },
-{ deposit:350, referrals:185, reward:6500 },
+{ deposit:250, referrals:10, reward:300 },
+{ deposit:250, referrals:35, reward:1000 },
+{ deposit:250, referrals:85, reward:2700 },
+{ deposit:250, referrals:185, reward:6500 },
 
-{ deposit:850, referrals:10, reward:700 },
-{ deposit:850, referrals:35, reward:2200 },
-{ deposit:850, referrals:85, reward:5200 },
-{ deposit:850, referrals:185, reward:12200 },
+{ deposit:500, referrals:10, reward:700 },
+{ deposit:500, referrals:35, reward:2200 },
+{ deposit:500, referrals:85, reward:5200 },
+{ deposit:500, referrals:185, reward:12200 },
 
-{ deposit:1850, referrals:10, reward:1200 },
-{ deposit:1850, referrals:35, reward:4200 },
-{ deposit:1850, referrals:85, reward:11200 },
-{ deposit:1850, referrals:185, reward:23200 }
+{ deposit:1000, referrals:10, reward:1200 },
+{ deposit:1000, referrals:35, reward:4200 },
+{ deposit:1000, referrals:85, reward:11200 },
+{ deposit:1000, referrals:185, reward:23200 }
 
 ];
 
@@ -185,21 +185,21 @@ router.get("/dashboard/:parentId", async (req, res) => {
       `SELECT 
 COUNT(*) FILTER (
   WHERE trading_wallet_amount >= 100
-  AND trading_wallet_amount < 350
+  AND trading_wallet_amount < 250
 ) as level1,
 
 COUNT(*) FILTER (
-  WHERE trading_wallet_amount >= 350
-  AND trading_wallet_amount < 850
+  WHERE trading_wallet_amount >= 250
+  AND trading_wallet_amount < 500
 ) as level2,
 
 COUNT(*) FILTER (
-  WHERE trading_wallet_amount >= 850
-  AND trading_wallet_amount < 1850
+  WHERE trading_wallet_amount >= 500
+  AND trading_wallet_amount < 1000
 ) as level3,
 
 COUNT(*) FILTER (
-  WHERE trading_wallet_amount >= 1850
+  WHERE trading_wallet_amount >= 1000
 ) as level4
 
 FROM users
@@ -242,14 +242,16 @@ LIMIT 10`,
       [parentId]
     );
 
-   const levels = [
+  const levels = [
+
 { name: "$100 Task", deposit:100, targets:[10,35,85,185], rewards:[75,275,755,1755] },
 
-{ name: "$250 Task", deposit:350, targets:[10,35,85,185], rewards:[300,1000,2700,6500] },
+{ name: "$250 Task", deposit:250, targets:[10,35,85,185], rewards:[300,1000,2700,6500] },
 
-{ name: "$500 Task", deposit:850, targets:[10,35,85,185], rewards:[700,2200,5200,12200] },
+{ name: "$500 Task", deposit:500, targets:[10,35,85,185], rewards:[700,2200,5200,12200] },
 
-{ name: "$1000 Task", deposit:1850, targets:[10,35,85,185], rewards:[1200,4200,11200,23200] }
+{ name: "$1000 Task", deposit:1000, targets:[10,35,85,185], rewards:[1200,4200,11200,23200] }
+
 ];
 
     const progress = levels.map(level => {
@@ -432,12 +434,12 @@ router.get("/test/:userId", async (req, res) => {
     const { userId } = req.params;
     const fund = Number(req.query.fund || 250);
 
-    let requiredWallet = 350;
+    let requiredWallet = 250;
 
-    if (fund == 150) requiredWallet = 100;
-    if (fund == 250) requiredWallet = 350;
-    if (fund == 500) requiredWallet = 850;
-    if (fund == 1000) requiredWallet = 1850;
+if (fund == 100) requiredWallet = 100;
+if (fund == 250) requiredWallet = 250;
+if (fund == 500) requiredWallet = 500;
+if (fund == 1000) requiredWallet = 1000;
 
     const result = await pool.query(
       `
@@ -509,7 +511,7 @@ router.get("/fake/:parentId", async (req, res) => {
       SELECT COUNT(*) AS total
       FROM users
       WHERE parent_id = $1
-      AND trading_wallet_amount >= 350
+      AND trading_wallet_amount >= 250
       `,
       [parentId]
     );
