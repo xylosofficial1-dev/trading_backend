@@ -1,4 +1,4 @@
-// backend/utils/referraltaskProce
+// backend/utils/referraltaskProcessor.js
 const pool = require("../db/db");
 
 const rewardRules = [
@@ -54,52 +54,106 @@ async function processReferralTask(userId) {
 
       const count = parseInt(countRes.rows[0].count);
 
-      if (count >= rule.referrals) {
+//       if (count >= rule.referrals) {
 
-        const already = await client.query(
-          `
-          SELECT id FROM referral_task_rewards
-          WHERE user_id=$1
-          AND deposit_required=$2
-          AND referral_required=$3
-          `,
-          [parentId, rule.deposit, rule.referrals]
-        );
+//         const already = await client.query(
+//           `
+//           SELECT id FROM referral_task_rewards
+//           WHERE user_id=$1
+//           AND deposit_required=$2
+//           AND referral_required=$3
+//           `,
+//           [parentId, rule.deposit, rule.referrals]
+//         );
 
-        if (already.rowCount > 0) continue;
+//         if (already.rowCount > 0) continue;
 
-        await client.query(
-          `
-          UPDATE users
-          SET wallet_amount = wallet_amount + $1
-          WHERE id=$2
-          `,
-          [rule.reward, parentId]
-        );
+//         // await client.query(
+//         //   `
+//         //   UPDATE users
+//         //   SET wallet_amount = wallet_amount + $1
+//         //   WHERE id=$2
+//         //   `,
+//         //   [rule.reward, parentId]
+//         // );
 
-        await client.query(
-          `
-          INSERT INTO referral_task_rewards
-          (user_id, deposit_required, referral_required, reward_amount)
-          VALUES ($1,$2,$3,$4)
-          `,
-          [parentId, rule.deposit, rule.referrals, rule.reward]
-        );
+//         await client.query(
+//   `
+//   INSERT INTO referral_task_rewards
+//   (user_id, deposit_required, referral_required, reward_amount)
+//   VALUES ($1,$2,$3,$4)
+//   `,
+//   [parentId, rule.deposit, rule.referrals, rule.reward]
+// );
 
-        await client.query(
-          `
-          INSERT INTO notifications
-          (title,message,target_type,target_users)
-          VALUES ($1,$2,'custom',$3)
-          `,
-          [
-            "Referral Task Reward",
-            `🎉 You received $${rule.reward} for ${rule.referrals} referrals.`,
-            parentId.toString()
-          ]
-        );
+//         await client.query(
+//           `
+//           INSERT INTO referral_task_rewards
+//           (user_id, deposit_required, referral_required, reward_amount)
+//           VALUES ($1,$2,$3,$4)
+//           `,
+//           [parentId, rule.deposit, rule.referrals, rule.reward]
+//         );
 
-      }
+//         await client.query(
+//           `
+//           INSERT INTO notifications
+//           (title,message,target_type,target_users)
+//           VALUES ($1,$2,'custom',$3)
+//           `,
+//           [
+//             "Referral Task Reward",
+//             `🎉 You received $${rule.reward} for ${rule.referrals} referrals.`,
+//             parentId.toString()
+//           ]
+//         );
+
+//       }
+
+if (count >= rule.referrals) {
+
+  const already = await client.query(
+    `
+    SELECT id
+    FROM referral_task_rewards
+    WHERE user_id=$1
+    AND deposit_required=$2
+    AND referral_required=$3
+    `,
+    [parentId, rule.deposit, rule.referrals]
+  );
+
+  if (already.rowCount > 0) continue;
+
+  await client.query(
+    `
+    INSERT INTO referral_task_rewards
+    (
+      user_id,
+      deposit_required,
+      referral_required,
+      reward_amount,
+      claimed
+    )
+    VALUES ($1,$2,$3,$4,false)
+    `,
+    [parentId, rule.deposit, rule.referrals, rule.reward]
+  );
+
+  await client.query(
+    `
+    INSERT INTO notifications
+    (title,message,target_type,target_users)
+    VALUES ($1,$2,'custom',$3)
+    `,
+    [
+      "Referral Task Reward Available",
+      `🎉 You can now claim $${rule.reward} reward.`,
+      parentId.toString()
+    ]
+  );
+
+}
 
     }
 
