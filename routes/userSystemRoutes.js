@@ -1398,6 +1398,36 @@ router.get("/commission-history/user/:userId", async (req, res) => {
    CHECK COMMISSION LOCK
    GET /api/system/commission-status
 ========================================= */
+// router.get("/commission-status", async (req, res) => {
+//   try {
+//     const result = await pool.query(
+//       `SELECT last_run FROM commission_runs ORDER BY id DESC LIMIT 1`
+//     );
+
+//     if (!result.rowCount) {
+//       return res.json({ locked: false });
+//     }
+
+//     const lastRun = new Date(result.rows[0].last_run);
+//     const now = new Date();
+
+//     const diff = (now - lastRun) / (1000 * 60 * 60);
+
+//     if (diff < 16) {
+//       const remaining = (16 - diff).toFixed(2);
+//       return res.json({
+//         locked: true,
+//         remaining,
+//       });
+//     }
+
+//     res.json({ locked: false });
+//   } catch (err) {
+//     console.error("COMMISSION STATUS ERROR:", err);
+//     res.status(500).json({ error: "Failed to check status" });
+//   }
+// });
+
 router.get("/commission-status", async (req, res) => {
   try {
     const result = await pool.query(
@@ -1414,17 +1444,22 @@ router.get("/commission-status", async (req, res) => {
     const diff = (now - lastRun) / (1000 * 60 * 60);
 
     if (diff < 16) {
-      const remaining = (16 - diff).toFixed(2);
       return res.json({
         locked: true,
-        remaining,
+        remaining: (16 - diff).toFixed(2),
       });
     }
 
-    res.json({ locked: false });
+    return res.json({ locked: false });
+
   } catch (err) {
-    console.error("COMMISSION STATUS ERROR:", err);
-    res.status(500).json({ error: "Failed to check status" });
+    console.error("COMMISSION STATUS ERROR FULL:", err);
+
+    return res.status(500).json({
+      message: err.message,
+      detail: err.detail,
+      code: err.code
+    });
   }
 });
 
