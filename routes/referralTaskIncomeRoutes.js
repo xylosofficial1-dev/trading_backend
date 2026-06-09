@@ -84,38 +84,17 @@ router.post("/claim", async (req, res) => {
     const { userId, deposit, referralTarget, rewardAmount } = req.body;
 
     // check eligible referrals
-    // const refs = await pool.query(
-    //   `
-    //   SELECT COUNT(*) 
-    //   FROM users
-    //   WHERE parent_id = $1
-    //   AND trading_wallet_amount >= $2
-    //   `,
-    //   [userId, deposit]
-    // );
+    const refs = await pool.query(
+      `
+      SELECT COUNT(*) 
+      FROM users
+      WHERE parent_id = $1
+      AND trading_wallet_amount >= $2
+      `,
+      [userId, deposit]
+    );
 
-    // const count = Number(refs.rows[0].count);
-
-    const depositMap = {
-  100: "level1",
-  250: "level2",
-  500: "level3",
-  1000: "level4"
-};
-
-const stats = await pool.query(`
-SELECT
-COUNT(*) FILTER (WHERE trading_wallet_amount >= 100) as level1,
-COUNT(*) FILTER (WHERE trading_wallet_amount >= 250) as level2,
-COUNT(*) FILTER (WHERE trading_wallet_amount >= 500) as level3,
-COUNT(*) FILTER (WHERE trading_wallet_amount >= 1000) as level4
-FROM users
-WHERE parent_id = $1
-`, [userId]);
-
-const count = Number(
-  stats.rows[0][depositMap[deposit]]
-);
+    const count = Number(refs.rows[0].count);
 
     if (count < referralTarget) {
       return res.status(400).json({ error: "Not eligible" });
@@ -206,14 +185,17 @@ router.get("/dashboard/:parentId", async (req, res) => {
       `SELECT 
 COUNT(*) FILTER (
   WHERE trading_wallet_amount >= 100
+  AND trading_wallet_amount < 250
 ) as level1,
 
 COUNT(*) FILTER (
   WHERE trading_wallet_amount >= 250
+  AND trading_wallet_amount < 500
 ) as level2,
 
 COUNT(*) FILTER (
   WHERE trading_wallet_amount >= 500
+  AND trading_wallet_amount < 1000
 ) as level3,
 
 COUNT(*) FILTER (
