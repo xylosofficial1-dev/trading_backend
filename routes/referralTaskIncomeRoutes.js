@@ -83,38 +83,48 @@ router.post("/claim", async (req, res) => {
   try {
     const { userId, deposit, referralTarget, rewardAmount } = req.body;
 
-    console.log("========== CLAIM START ==========");
-    console.log({
-      userId,
-      deposit,
-      referralTarget,
-      rewardAmount
-    });
-
     // check eligible referrals
-    const refs = await pool.query(
-      `
-      SELECT COUNT(*)
-      FROM users
-      WHERE parent_id = $1
-      AND trading_wallet_amount >= $2
-      `,
-      [userId, deposit]
-    );
+    // const refs = await pool.query(
+    //   `
+    //   SELECT COUNT(*) 
+    //   FROM users
+    //   WHERE parent_id = $1
+    //   AND trading_wallet_amount >= $2
+    //   `,
+    //   [userId, deposit]
+    // );
 
-    const count = Number(refs.rows[0].count);
+    // const count = Number(refs.rows[0].count);
 
-    console.log("Eligible referrals:", count);
+    const depositMap = {
+  100: "level1",
+  250: "level2",
+  500: "level3",
+  1000: "level4"
+};
+
+const stats = await pool.query(`
+SELECT
+COUNT(*) FILTER (WHERE trading_wallet_amount >= 100) as level1,
+COUNT(*) FILTER (WHERE trading_wallet_amount >= 250) as level2,
+COUNT(*) FILTER (WHERE trading_wallet_amount >= 500) as level3,
+COUNT(*) FILTER (WHERE trading_wallet_amount >= 1000) as level4
+FROM users
+WHERE parent_id = $1
+`, [userId]);
+
+const count = Number(
+  stats.rows[0][depositMap[deposit]]
+);
 
     if (count < referralTarget) {
-      console.log("FAILED: Not eligible");
       return res.status(400).json({ error: "Not eligible" });
     }
 
+    // check already claimed
     const exist = await pool.query(
       `
-      SELECT id
-      FROM referral_fund_rewards
+      SELECT id FROM referral_fund_rewards
       WHERE parent_id=$1
       AND fund_level=$2
       AND referral_target=$3
@@ -122,17 +132,13 @@ router.post("/claim", async (req, res) => {
       [userId, deposit, referralTarget]
     );
 
-    console.log("Already claimed rows:", exist.rows.length);
-
     if (exist.rows.length > 0) {
-      console.log("FAILED: Already claimed");
       return res.status(400).json({ error: "Already claimed" });
     }
 
     await pool.query("BEGIN");
 
-    console.log("Updating wallet...");
-
+    // 💰 add money
     await pool.query(
       `
       UPDATE users
@@ -142,8 +148,7 @@ router.post("/claim", async (req, res) => {
       [rewardAmount, userId]
     );
 
-    console.log("Wallet updated");
-
+    // save claim
     await pool.query(
       `
       INSERT INTO referral_fund_rewards
@@ -153,8 +158,7 @@ router.post("/claim", async (req, res) => {
       [userId, deposit, referralTarget, rewardAmount]
     );
 
-    console.log("Reward record inserted");
-
+    // notification
     await pool.query(
       `
       INSERT INTO notifications
@@ -168,21 +172,13 @@ router.post("/claim", async (req, res) => {
       ]
     );
 
-    console.log("Notification inserted");
-
     await pool.query("COMMIT");
-
-    console.log("COMMIT SUCCESS");
-    console.log("========== CLAIM END ==========");
 
     res.json({ success: true });
 
   } catch (err) {
     await pool.query("ROLLBACK");
-
-    console.error("CLAIM ERROR:");
     console.error(err);
-
     res.status(500).json({ error: "server error" });
   }
 });
@@ -207,7 +203,7 @@ router.get("/dashboard/:parentId", async (req, res) => {
     );
 
      const depositStats = await pool.query(
-      `SELECT
+      `SELECT 
 COUNT(*) FILTER (
   WHERE trading_wallet_amount >= 100
 ) as level1,
@@ -223,6 +219,7 @@ COUNT(*) FILTER (
 COUNT(*) FILTER (
   WHERE trading_wallet_amount >= 1000
 ) as level4
+
 FROM users
 WHERE parent_id = $1`,
       [parentId]
