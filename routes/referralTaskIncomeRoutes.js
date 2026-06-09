@@ -182,26 +182,22 @@ router.get("/dashboard/:parentId", async (req, res) => {
     );
 
      const depositStats = await pool.query(
-      `SELECT 
+      `SELECT
 COUNT(*) FILTER (
   WHERE trading_wallet_amount >= 100
-  AND trading_wallet_amount < 250
 ) as level1,
 
 COUNT(*) FILTER (
   WHERE trading_wallet_amount >= 250
-  AND trading_wallet_amount < 500
 ) as level2,
 
 COUNT(*) FILTER (
   WHERE trading_wallet_amount >= 500
-  AND trading_wallet_amount < 1000
 ) as level3,
 
 COUNT(*) FILTER (
   WHERE trading_wallet_amount >= 1000
 ) as level4
-
 FROM users
 WHERE parent_id = $1`,
       [parentId]
