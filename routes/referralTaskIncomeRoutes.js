@@ -83,10 +83,18 @@ router.post("/claim", async (req, res) => {
   try {
     const { userId, deposit, referralTarget, rewardAmount } = req.body;
 
+    console.log("========== CLAIM START ==========");
+    console.log({
+      userId,
+      deposit,
+      referralTarget,
+      rewardAmount
+    });
+
     // check eligible referrals
     const refs = await pool.query(
       `
-      SELECT COUNT(*) 
+      SELECT COUNT(*)
       FROM users
       WHERE parent_id = $1
       AND trading_wallet_amount >= $2
@@ -96,14 +104,17 @@ router.post("/claim", async (req, res) => {
 
     const count = Number(refs.rows[0].count);
 
+    console.log("Eligible referrals:", count);
+
     if (count < referralTarget) {
+      console.log("FAILED: Not eligible");
       return res.status(400).json({ error: "Not eligible" });
     }
 
-    // check already claimed
     const exist = await pool.query(
       `
-      SELECT id FROM referral_fund_rewards
+      SELECT id
+      FROM referral_fund_rewards
       WHERE parent_id=$1
       AND fund_level=$2
       AND referral_target=$3
@@ -111,13 +122,17 @@ router.post("/claim", async (req, res) => {
       [userId, deposit, referralTarget]
     );
 
+    console.log("Already claimed rows:", exist.rows.length);
+
     if (exist.rows.length > 0) {
+      console.log("FAILED: Already claimed");
       return res.status(400).json({ error: "Already claimed" });
     }
 
     await pool.query("BEGIN");
 
-    // 💰 add money
+    console.log("Updating wallet...");
+
     await pool.query(
       `
       UPDATE users
@@ -127,7 +142,8 @@ router.post("/claim", async (req, res) => {
       [rewardAmount, userId]
     );
 
-    // save claim
+    console.log("Wallet updated");
+
     await pool.query(
       `
       INSERT INTO referral_fund_rewards
@@ -137,7 +153,8 @@ router.post("/claim", async (req, res) => {
       [userId, deposit, referralTarget, rewardAmount]
     );
 
-    // notification
+    console.log("Reward record inserted");
+
     await pool.query(
       `
       INSERT INTO notifications
@@ -151,13 +168,21 @@ router.post("/claim", async (req, res) => {
       ]
     );
 
+    console.log("Notification inserted");
+
     await pool.query("COMMIT");
+
+    console.log("COMMIT SUCCESS");
+    console.log("========== CLAIM END ==========");
 
     res.json({ success: true });
 
   } catch (err) {
     await pool.query("ROLLBACK");
+
+    console.error("CLAIM ERROR:");
     console.error(err);
+
     res.status(500).json({ error: "server error" });
   }
 });
