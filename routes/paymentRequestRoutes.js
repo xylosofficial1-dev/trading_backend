@@ -7,22 +7,45 @@ const processReferralTask = require("../utils/referralTaskProcessor");
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-router.post( "/submit",
+router.post(
+  "/submit",
   upload.single("screenshot"),
   async (req, res) => {
     try {
       const { userId, amount_usd } = req.body;
-const tx_hash = req.body.tx_hash.trim().toLowerCase();
-
+      const tx_hash = req.body.tx_hash.trim().toLowerCase();
 
       if (!userId || !tx_hash || !amount_usd || !req.file) {
         return res.status(400).json({ message: "Missing data" });
       }
 
+      // ✅ KYC CHECK
+      const userResult = await pool.query(
+        `
+        SELECT kyc_verify
+        FROM users
+        WHERE id = $1
+        `,
+        [userId]
+      );
+
+      if (
+        userResult.rows.length === 0 ||
+        !userResult.rows[0].kyc_verify
+      ) {
+        return res.status(403).json({
+          message: "Please complete KYC verification first"
+        });
+      }
+
       // 🔒 Check pending request
       const pending = await pool.query(
-        `SELECT id FROM payment_requests
-         WHERE user_id=$1 AND status='pending'`,
+        `
+        SELECT id
+        FROM payment_requests
+        WHERE user_id=$1
+        AND status='pending'
+        `,
         [userId]
       );
 
@@ -42,20 +65,23 @@ const tx_hash = req.body.tx_hash.trim().toLowerCase();
       );
 
       res.json({ success: true });
-   } catch (err) {
-  console.error("SUBMIT ERROR:", err);
 
-  // 🔁 Duplicate tx_hash
-  if (err.code === "23505") {
-    return res.status(409).json({
-      message: "This transaction hash is already used"
-    });
-  }
+    } catch (err) {
+      console.error("SUBMIT ERROR:", err);
 
-  res.status(500).json({ message: "Server error" });
-}
+      if (err.code === "23505") {
+        return res.status(409).json({
+          message: "This transaction hash is already used"
+        });
+      }
+
+      res.status(500).json({
+        message: "Server error"
+      });
+    }
   }
 );
+
 // CHECK USER KYC STATUS
 router.get("/check-kyc/:userId", async (req, res) => {
   try {

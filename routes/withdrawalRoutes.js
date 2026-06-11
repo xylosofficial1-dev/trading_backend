@@ -311,9 +311,11 @@ await pool.query(
     // ✅ CHECK BALANCE
     // ===============================
     const userRes = await pool.query(
-      "SELECT wallet_amount FROM users WHERE id = $1",
-      [user_id]
-    );
+  `SELECT wallet_amount, name, email
+   FROM users
+   WHERE id = $1`,
+  [user_id]
+);
 
     if (userRes.rows.length === 0) {
       return res.status(404).json({
@@ -361,6 +363,47 @@ await pool.query(
        WHERE user_id = $1`,
       [user_id]
     );
+
+    const user = userRes.rows[0];
+
+await resend.emails.send({
+  from: process.env.FROM_EMAIL,
+  to: user.email,
+  subject: "Withdrawal Request Submitted",
+  html: `
+  <div style="font-family:Arial;padding:20px;">
+    <h2>Withdrawal Request Submitted</h2>
+
+    <p>Hello ${user.name},</p>
+
+    <p>Your withdrawal request has been received and is currently being processed.</p>
+
+    <table style="border-collapse:collapse;">
+      <tr>
+        <td><b>Name:</b></td>
+        <td>${user.name}</td>
+      </tr>
+      <tr>
+        <td><b>Amount:</b></td>
+        <td>$${amount}</td>
+      </tr>
+      <tr>
+        <td><b>Wallet Address:</b></td>
+        <td>${wallet_address}</td>
+      </tr>
+      <tr>
+        <td><b>Status:</b></td>
+        <td>Processing</td>
+      </tr>
+    </table>
+
+    <br/>
+    <p>You will receive another email once the withdrawal is completed.</p>
+
+    <p>Team Xylos</p>
+  </div>
+  `,
+});
 
     res.json({
       success: true,
@@ -443,10 +486,13 @@ router.post("/approve/:id", async (req, res) => {
     }
 
     // Check balance again (important)
-    const user = await client.query(
-      "SELECT wallet_amount FROM users WHERE id = $1 FOR UPDATE",
-      [reqData.user_id]
-    );
+   const user = await client.query(
+  `SELECT wallet_amount, name, email
+   FROM users
+   WHERE id = $1
+   FOR UPDATE`,
+  [reqData.user_id]
+);
 
     const balance = Number(user.rows[0].wallet_amount);
 
@@ -482,6 +528,45 @@ router.post("/approve/:id", async (req, res) => {
     );
 
     await client.query("COMMIT");
+
+        await resend.emails.send({
+  from: process.env.FROM_EMAIL,
+  to: user.rows[0].email,
+  subject: "Withdrawal Completed",
+  html: `
+  <div style="font-family:Arial;padding:20px;">
+    <h2>Withdrawal Completed Successfully</h2>
+
+    <p>Hello ${user.rows[0].name},</p>
+
+    <p>Your withdrawal has been processed successfully.</p>
+
+    <table style="border-collapse:collapse;">
+      <tr>
+        <td><b>Name:</b></td>
+        <td>${user.rows[0].name}</td>
+      </tr>
+      <tr>
+        <td><b>Amount:</b></td>
+        <td>$${reqData.amount}</td>
+      </tr>
+      <tr>
+        <td><b>Wallet Address:</b></td>
+        <td>${reqData.wallet_address}</td>
+      </tr>
+      <tr>
+        <td><b>Status:</b></td>
+        <td>Completed</td>
+      </tr>
+    </table>
+
+    <br/>
+    <p>The withdrawal has been sent to the wallet address provided.</p>
+
+    <p>Team Xylos</p>
+  </div>
+  `,
+});
 
     res.json({ 
       success: true, 

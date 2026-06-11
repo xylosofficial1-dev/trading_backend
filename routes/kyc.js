@@ -1,8 +1,13 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
+const sharp = require("sharp");
 
 const pool = require("../db/db");
+
+const {
+  sendKycApprovedEmail,
+} = require("../services/emailService");
 
 const storage = multer.memoryStorage();
 
@@ -13,8 +18,8 @@ const upload = multer({
   },
 });
 
-router.post(
-  "/submit",
+router.post( "/submit",
+  
   upload.fields([
     { name: "gov_id_image", maxCount: 1 },
     { name: "face_image", maxCount: 1 },
@@ -37,6 +42,16 @@ router.post(
           error: "Both images required",
         });
       }
+
+      const compressedGov = await sharp(govImage.buffer)
+  .resize({ width: 1200, withoutEnlargement: true })
+  .jpeg({ quality: 60 })
+  .toBuffer();
+
+const compressedFace = await sharp(faceImage.buffer)
+  .resize({ width: 800, withoutEnlargement: true })
+  .jpeg({ quality: 60 })
+  .toBuffer();
 
       /*
       check existing
@@ -66,10 +81,10 @@ router.post(
           WHERE user_id = $3
           `,
           [
-            govImage.buffer,
-            faceImage.buffer,
-            user_id,
-          ]
+  compressedGov,
+  compressedFace,
+  user_id,
+]
         );
 
       } else {
@@ -87,11 +102,11 @@ router.post(
           )
           VALUES ($1,$2,$3)
           `,
-          [
-            user_id,
-            govImage.buffer,
-            faceImage.buffer,
-          ]
+        [
+  user_id,
+  compressedGov,
+  compressedFace,
+]
         );
       }
 
@@ -105,9 +120,10 @@ router.post(
 
       res.status(500).json({
         error: "Server error",
-      });
+      }); 
     }
   }
+
 );
 
 router.get("/status/:userId", async (req, res) => {
@@ -161,17 +177,19 @@ router.put("/approve/:id", async (req, res) => {
 
     const { id } = req.params;
 
-    /*
-    get kyc request
-    */
-    const kycResult = await pool.query(
-      `
-      SELECT user_id
-      FROM kyc_requests
-      WHERE id = $1
-      `,
-      [id]
-    );
+   const kycResult = await pool.query(
+  `
+  SELECT
+    k.user_id,
+    u.email,
+    u.name
+  FROM kyc_requests k
+  JOIN users u
+    ON u.id = k.user_id
+  WHERE k.id = $1
+  `,
+  [id]
+);
 
     if (kycResult.rows.length === 0) {
       return res.status(404).json({
@@ -180,6 +198,8 @@ router.put("/approve/:id", async (req, res) => {
     }
 
     const userId = kycResult.rows[0].user_id;
+    const userEmail = kycResult.rows[0].email;
+const userName = kycResult.rows[0].name;
 
     /*
     approve kyc
@@ -229,11 +249,16 @@ router.put("/approve/:id", async (req, res) => {
         userId.toString(),
       ]
     );
+    await sendKycApprovedEmail(
+  userEmail,
+  userName
+);
 
     res.json({
       success: true,
       message: "KYC approved",
     });
+    
 
   } catch (err) {
     console.log(err);

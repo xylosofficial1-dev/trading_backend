@@ -764,35 +764,44 @@ router.get("/payment-proof/:requestId", async (req, res) => {
   }
 });
 
-// Get all active listings for buyer
 router.get("/listings/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
 
     const result = await pool.query(
-      `SELECT 
-        l.id,
-        l.coin_name,
-        l.price,
-        l.quantity,
-        l.payment_method,
-        l.bank_details,
-        l.upi_id,
-        l.wallet_address,
-        l.qr_image,
-        u.name AS username,
-        u.is_online
-       FROM p2p_sell_listings l
-       JOIN users u ON u.id = l.user_id
-       WHERE l.status='active'
-       AND l.user_id != $1
-       ORDER BY l.created_at DESC`,
-      [userId]
-    );
+`
+SELECT
+    l.id,
+    l.coin_name,
+    l.price,
+    l.quantity,
+    l.payment_method,
+    l.bank_details,
+    l.upi_id,
+    l.wallet_address,
+    l.qr_image,
+
+    u.name AS username,
+    u.is_online,
+    u.kyc_verify,
+
+    COALESCE(ps.auto_renew, false) AS badge_enabled
+
+FROM p2p_sell_listings l
+JOIN users u
+    ON u.id = l.user_id
+LEFT JOIN premium_subscriptions ps
+    ON ps.user_id = u.id
+WHERE l.status = 'active'
+AND l.user_id != $1
+ORDER BY l.created_at DESC;
+`,
+[userId]
+);
 
     const listings = result.rows.map(listing => {
       if (listing.qr_image) {
-        listing.qr_image = listing.qr_image.toString('base64');
+        listing.qr_image = listing.qr_image.toString("base64");
       }
       return listing;
     });

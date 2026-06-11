@@ -485,7 +485,8 @@ router.get("/all", async (req, res) => {
         wallet_amount,
         trading_wallet_amount,
         tw_to_mw,
-        created_at
+        created_at,
+        kyc_verify 
       FROM users
       ORDER BY id DESC
     `);
@@ -518,6 +519,64 @@ router.put("/users/:id/status", async (req, res) => {
   }
 });
 
+// PUT /api/users/:userId/kyc-verify
+router.put('/users/:userId/kyc-verify', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { kyc_verify } = req.body;
+    
+    // Start a transaction
+    await pool.query('BEGIN');
+    
+    // 1. Update users table
+    const updateUserQuery = 'UPDATE users SET kyc_verify = $1 WHERE id = $2';
+    await pool.query(updateUserQuery, [kyc_verify, userId]);
+    
+    // 2. Update kyc_requests table based on status
+    let kycStatus;
+    if (kyc_verify === true || kyc_verify === 1) {
+      kycStatus = 'approved';
+    } else {
+      kycStatus = 'pending';
+    }
+    
+    // Check if KYC request exists for this user
+    const checkRequest = await pool.query(
+      'SELECT id FROM kyc_requests WHERE user_id = $1 ORDER BY id DESC LIMIT 1',
+      [userId]
+    );
+    
+    if (checkRequest.rows.length > 0) {
+      // Update existing KYC request status
+      const updateRequestQuery = `
+        UPDATE kyc_requests 
+        SET status = $1, 
+            updated_at = NOW()
+        WHERE user_id = $2 AND id = $3
+      `;
+      await pool.query(updateRequestQuery, [kycStatus, userId, checkRequest.rows[0].id]);
+    } else {
+      // Note: This case shouldn't happen normally since KYC request is created when user submits documents
+      // But if somehow no request exists, you might want to handle it
+      console.log(`No KYC request found for user ${userId} when trying to update status to ${kycStatus}`);
+    }
+    
+    // Commit transaction
+    await pool.query('COMMIT');
+    
+    res.json({ 
+      success: true, 
+      message: `KYC verification ${kyc_verify === true || kyc_verify === 1 ? 'approved' : 'updated'} successfully` 
+    });
+    
+  } catch (error) {
+    // Rollback on error
+    await pool.query('ROLLBACK');
+    console.error("KYC Update Error:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 router.get("/user-status/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -536,7 +595,6 @@ router.get("/user-status/:id", async (req, res) => {
 
   res.json({ success: true });
 });
-
 
 router.post("/wallet/send", async (req, res) => {
   const { senderId, recipientAddress, amount } = req.body;
@@ -922,6 +980,86 @@ router.put("/users/:id/amounts", async (req, res) => {
       success: false,
       message: "Server error",
     });
+  }
+});
+
+// GET all users with commission status
+router.get("/all-with-commission", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        id,
+        name,
+        email,
+        phone,
+        status,
+        kyc_verify,
+        commission_enabled,
+        wallet_amount,
+        trading_wallet_amount,
+        created_at
+      FROM users
+      ORDER BY id DESC
+    `);
+
+    res.status(200).json({
+      success: true,
+      count: result.rows.length,
+      data: result.rows
+    });
+  } catch (err) {
+    console.error("Fetch users error:", err);
+    res.status(500).json({ error: "Failed to fetch users" });
+  }
+});
+
+// Toggle commission status for a user
+router.put("/users/:userId/commission", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { commission_enabled } = req.body;
+    
+    const result = await pool.query(
+      "UPDATE users SET commission_enabled = $1 WHERE id = $2 RETURNING id, commission_enabled",
+      [commission_enabled, userId]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    
+    res.json({
+      success: true,
+      message: `Commission ${commission_enabled ? 'enabled' : 'disabled'} successfully`,
+      data: result.rows[0]
+    });
+  } catch (err) {
+    console.error("Toggle commission error:", err);
+    res.status(500).json({ error: "Failed to update commission status" });
+  }
+});
+
+// Get commission status for a specific user
+router.get("/users/:userId/commission", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    const result = await pool.query(
+      "SELECT id, name, email, commission_enabled FROM users WHERE id = $1",
+      [userId]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    
+    res.json({
+      success: true,
+      data: result.rows[0]
+    });
+  } catch (err) {
+    console.error("Get commission error:", err);
+    res.status(500).json({ error: "Failed to fetch commission status" });
   }
 });
 
