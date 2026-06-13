@@ -132,17 +132,20 @@ router.get("/status/:userId", async (req, res) => {
     const { userId } = req.params;
 
     const result = await pool.query(
-      `
-      SELECT
-        id,
-        status,
-        reject_reason,
-        created_at
-      FROM kyc_requests
-      WHERE user_id = $1
-      `,
-      [userId]
-    );
+  `
+  SELECT
+  k.id,
+  k.status,
+  k.reject_reason,
+  k.created_at,
+  u.kyc_verify
+FROM kyc_requests k
+JOIN users u
+  ON u.id = k.user_id
+WHERE k.user_id = $1
+  `,
+  [userId]
+);
 
     if (result.rows.length === 0) {
       return res.json({

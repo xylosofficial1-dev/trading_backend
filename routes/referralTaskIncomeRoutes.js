@@ -360,14 +360,24 @@ router.get("/network-levels/:userId", async (req, res) => {
       const total = rows.length;
 
       const active = rows.filter(
-        (u) => Number(u.trading_wallet_amount) >= 100
-      ).length;
+  (u) => Number(u.trading_wallet_amount) >= 100
+).length;
 
-      levels.push({
-        level,
-        total,
-        active,
-      });
+const business = rows.reduce(
+  (sum, u) =>
+    sum +
+    (Number(u.trading_wallet_amount) >= 100
+      ? Number(u.trading_wallet_amount)
+      : 0),
+  0
+);
+
+levels.push({
+  level,
+  total,
+  active,
+  business,
+});
 
       currentParents = rows.map((r) => r.id);
     }

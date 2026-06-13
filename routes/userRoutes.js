@@ -997,7 +997,14 @@ router.get("/all-with-commission", async (req, res) => {
         commission_enabled,
         wallet_amount,
         trading_wallet_amount,
-        created_at
+        wallet_address,
+        created_at,
+        dob,
+        gender,
+        country_code,
+        referral_code,
+        parent_id,
+        is_verified
       FROM users
       ORDER BY id DESC
     `);
