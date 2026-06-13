@@ -128,44 +128,60 @@ const compressedFace = await sharp(faceImage.buffer)
 
 router.get("/status/:userId", async (req, res) => {
   try {
-
     const { userId } = req.params;
 
-    const result = await pool.query(
-  `
-  SELECT
-  k.id,
-  k.status,
-  k.reject_reason,
-  k.created_at,
-  u.kyc_verify
-FROM kyc_requests k
-JOIN users u
-  ON u.id = k.user_id
-WHERE k.user_id = $1
-  `,
-  [userId]
-);
+    const userResult = await pool.query(
+      `
+      SELECT kyc_verify
+      FROM users
+      WHERE id = $1
+      `,
+      [userId]
+    );
 
-    if (result.rows.length === 0) {
-      return res.json({
-        submitted: false,
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        error: "User not found",
       });
     }
 
-    res.json({
+    const kycResult = await pool.query(
+      `
+      SELECT
+        id,
+        status,
+        reject_reason,
+        created_at
+      FROM kyc_requests
+      WHERE user_id = $1
+      ORDER BY id DESC
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    // No KYC request exists
+    if (kycResult.rows.length === 0) {
+      return res.json({
+        submitted: false,
+        data: {
+          kyc_verify: userResult.rows[0].kyc_verify,
+          status: userResult.rows[0].kyc_verify
+            ? "approved"
+            : null,
+        },
+      });
+    }
+
+    return res.json({
       submitted: true,
       data: {
-        ...result.rows[0],
-
-       gov_image_url:
-  `/api/kyc/gov-image/${userId}`,
-
-face_image_url:
-  `/api/kyc/face-image/${userId}`,
+        ...kycResult.rows[0],
+        kyc_verify: userResult.rows[0].kyc_verify,
+        gov_image_url: `/api/kyc/gov-image/${userId}`,
+        face_image_url: `/api/kyc/face-image/${userId}`,
       },
     });
-
   } catch (err) {
     console.log(err);
 
