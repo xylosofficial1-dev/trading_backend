@@ -127,6 +127,10 @@ app.use("/api/test", require("./routes/testRoutes"));
 app.use("/api/monthly-salary", require("./routes/monthlySalaryRoutes"));
 app.use("/api/admin-income", require("./routes/adminIncomeRoutes"));
 
+app.get("/", (req, res) => {
+  res.status(204).end();
+});
+
 // ✅ 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
