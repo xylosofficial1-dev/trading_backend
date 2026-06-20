@@ -128,7 +128,12 @@ app.use("/api/monthly-salary", require("./routes/monthlySalaryRoutes"));
 app.use("/api/admin-income", require("./routes/adminIncomeRoutes"));
 
 app.get("/", (req, res) => {
-  res.status(204).end();
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <body style="margin:0;background:white;"></body>
+    </html>
+  `);
 });
 
 // ✅ 404 handler
