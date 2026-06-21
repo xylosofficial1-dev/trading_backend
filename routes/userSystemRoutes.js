@@ -692,12 +692,13 @@ router.get("/auto-trade/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch auto trade status" });
   }
 });
-
+ 
 /* =========================================================
    GET ALL COMMISSION HISTORY (ADMIN)
    GET /api/system/commission-history/all
    ========================================================= */
 router.get("/commission-history/all", async (req, res) => {
+  console.log("COMMISSION HISTORY ROUTE HIT V2");
   try {
     const result = await pool.query(
       `
