@@ -520,6 +520,74 @@ router.post("/apply-commission/:id", async (req, res) => {
   }
 });
 
+router.get("/commission-status", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT last_run FROM commission_runs ORDER BY id DESC LIMIT 1`
+    );
+
+    if (!result.rowCount) {
+      return res.json({ locked: false });
+    }
+
+    const lastRun = new Date(result.rows[0].last_run);
+    const now = new Date();
+
+    const diff = (now - lastRun) / (1000 * 60 * 60);
+
+    if (diff < 16) {
+      return res.json({
+        locked: true,
+        remaining: (16 - diff).toFixed(2),
+      });
+    }
+
+    return res.json({ locked: false });
+
+  } catch (err) {
+    console.error("COMMISSION STATUS ERROR FULL:", err);
+
+    return res.status(500).json({
+      message: err.message,
+      detail: err.detail,
+      code: err.code
+    });
+  }
+});
+
+/* =========================================================
+   GET AUTO TRADE STATUS
+   GET /api/system/auto-trade/:id
+   ========================================================= */
+router.get("/auto-trade/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const user = await pool.query(
+      "SELECT auto_trade FROM users WHERE id=$1",
+      [id]
+    );
+
+    if (!user.rowCount)
+      return res.status(404).json({ error: "User not found" });
+
+    res.json({ auto_trade: user.rows[0].auto_trade });
+
+  } catch (err) {
+    console.error("AUTO TRADE FETCH ERROR:", err);
+    res.status(500).json({ error: "Failed to fetch auto trade status" });
+  }
+});
+ 
+router.get("/commission-history/all", async (req, res) => {
+  console.log("TEST ROUTE");
+
+  return res.json({
+    success: true,
+    message: "route works"
+  });
+});
+
 /* =========================================================
    GET COMMISSION HISTORY FOR USER
    GET /api/system/commission-history/:userId
@@ -598,108 +666,6 @@ router.get("/commission-history/user/:userId", async (req, res) => {
     console.error("USER COMMISSION HISTORY ERROR:", err);
     res.status(500).json({ error: "Failed to fetch user commission history" });
   }
-});
-
-/* =========================================
-   CHECK COMMISSION LOCK
-   GET /api/system/commission-status
-========================================= */
-// router.get("/commission-status", async (req, res) => {
-//   try {
-//     const result = await pool.query(
-//       `SELECT last_run FROM commission_runs ORDER BY id DESC LIMIT 1`
-//     );
-
-//     if (!result.rowCount) {
-//       return res.json({ locked: false });
-//     }
-
-//     const lastRun = new Date(result.rows[0].last_run);
-//     const now = new Date();
-
-//     const diff = (now - lastRun) / (1000 * 60 * 60);
-
-//     if (diff < 16) {
-//       const remaining = (16 - diff).toFixed(2);
-//       return res.json({
-//         locked: true,
-//         remaining,
-//       });
-//     }
-
-//     res.json({ locked: false });
-//   } catch (err) {
-//     console.error("COMMISSION STATUS ERROR:", err);
-//     res.status(500).json({ error: "Failed to check status" });
-//   }
-// });
-
-router.get("/commission-status", async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT last_run FROM commission_runs ORDER BY id DESC LIMIT 1`
-    );
-
-    if (!result.rowCount) {
-      return res.json({ locked: false });
-    }
-
-    const lastRun = new Date(result.rows[0].last_run);
-    const now = new Date();
-
-    const diff = (now - lastRun) / (1000 * 60 * 60);
-
-    if (diff < 16) {
-      return res.json({
-        locked: true,
-        remaining: (16 - diff).toFixed(2),
-      });
-    }
-
-    return res.json({ locked: false });
-
-  } catch (err) {
-    console.error("COMMISSION STATUS ERROR FULL:", err);
-
-    return res.status(500).json({
-      message: err.message,
-      detail: err.detail,
-      code: err.code
-    });
-  }
-});
-
-/* =========================================================
-   GET AUTO TRADE STATUS
-   GET /api/system/auto-trade/:id
-   ========================================================= */
-router.get("/auto-trade/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const user = await pool.query(
-      "SELECT auto_trade FROM users WHERE id=$1",
-      [id]
-    );
-
-    if (!user.rowCount)
-      return res.status(404).json({ error: "User not found" });
-
-    res.json({ auto_trade: user.rows[0].auto_trade });
-
-  } catch (err) {
-    console.error("AUTO TRADE FETCH ERROR:", err);
-    res.status(500).json({ error: "Failed to fetch auto trade status" });
-  }
-});
- 
-router.get("/commission-history/all", async (req, res) => {
-  console.log("TEST ROUTE");
-
-  return res.json({
-    success: true,
-    message: "route works"
-  });
 });
 
    router.post("/auto-trade/toggle", async (req, res) => {
