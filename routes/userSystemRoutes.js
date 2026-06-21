@@ -693,44 +693,13 @@ router.get("/auto-trade/:id", async (req, res) => {
   }
 });
  
-/* =========================================================
-   GET ALL COMMISSION HISTORY (ADMIN)
-   GET /api/system/commission-history/all
-   ========================================================= */
 router.get("/commission-history/all", async (req, res) => {
-  console.log("COMMISSION HISTORY ROUTE HIT V2");
-  try {
-    const result = await pool.query(
-      `
-      SELECT 
-        ch.id,
-        ch.user_id,
-        u.name as user_name,
-        u.email as user_email,
-        ch.commission_percent,
-        ch.commission_amount,
-        ch.wallet_type,
-        ch.before_balance,
-        ch.after_balance,
-        ch.commission_source,
-        ch.created_at
-      FROM commission_history ch
-      JOIN users u ON u.id = ch.user_id
-      ORDER BY ch.created_at DESC
-      LIMIT 1000
-      `
-    );
+  console.log("TEST ROUTE");
 
-    res.json({
-      success: true,
-      count: result.rowCount,
-      history: result.rows
-    });
-
-  } catch (err) {
-    console.error("ALL COMMISSION HISTORY ERROR:", err);
-    res.status(500).json({ error: "Failed to fetch commission history" });
-  }
+  return res.json({
+    success: true,
+    message: "route works"
+  });
 });
 
    router.post("/auto-trade/toggle", async (req, res) => {
