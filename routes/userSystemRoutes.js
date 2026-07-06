@@ -763,4 +763,119 @@ router.get("/maintenance", async (req, res) => {
   }
 });
 
+router.get("/settings/transfer-status", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT transfer_enabled FROM system_settings LIMIT 1"
+    );
+    if (result.rows.length === 0) {
+      return res.json({ success: true, enabled: true });
+    }
+    res.json({
+      success: true,
+      enabled: result.rows[0].transfer_enabled
+    });
+  } catch (err) {
+    console.error("GET TRANSFER STATUS ERROR:", err);
+    res.status(500).json({ success: false, error: "Database error" });
+  }
+});
+
+router.post("/settings/transfer/toggle", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT transfer_enabled FROM system_settings LIMIT 1"
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(400).json({ message: "No settings found" });
+    }
+
+    const current = result.rows[0].transfer_enabled;
+    const newValue = !current;
+
+    await pool.query(
+      "UPDATE system_settings SET transfer_enabled = $1",
+      [newValue]
+    );
+
+    res.json({
+      success: true,
+      enabled: newValue,
+    });
+  } catch (err) {
+    console.error("TOGGLE TRANSFER ERROR:", err);
+    res.status(500).json({ message: "Toggle failed" });
+  }
+});
+
+router.get("/settings/transfer-status/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const result = await pool.query(
+      "SELECT transfer_blocked FROM users WHERE id = $1",
+      [userId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: "User not found" });
+    }
+    res.json({
+      success: true,
+      transfer_blocked: result.rows[0].transfer_blocked
+    });
+  } catch (err) {
+    console.error("GET USER TRANSFER STATUS ERROR:", err);
+    res.status(500).json({ success: false, error: "Database error" });
+  }
+});
+
+router.post("/settings/transfer-settings/apply", async (req, res) => {
+  const { target, block, fromDate, toDate, userIds } = req.body;
+
+  try {
+    let query = "";
+    let params = [];
+
+    if (target === "all") {
+      query = "UPDATE users SET transfer_blocked = $1";
+      params = [block];
+    } else if (target === "date_range") {
+      if (!fromDate || !toDate) {
+        return res.status(400).json({ success: false, error: "Missing fromDate or toDate" });
+      }
+      query = `
+        UPDATE users 
+        SET transfer_blocked = CASE 
+          WHEN created_at >= $1 AND created_at <= $2 THEN $3 
+          ELSE $4 
+        END
+      `;
+      params = [
+        new Date(fromDate),
+        new Date(toDate + "T23:59:59.999Z"),
+        block,       // inside range
+        !block       // outside range
+      ];
+    } else if (target === "specific") {
+      if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+        return res.status(400).json({ success: false, error: "Missing or invalid userIds array" });
+      }
+      query = "UPDATE users SET transfer_blocked = $1 WHERE id = ANY($2)";
+      params = [block, userIds];
+    } else {
+      return res.status(400).json({ success: false, error: "Invalid target type" });
+    }
+
+    const result = await pool.query(query, params);
+    res.json({
+      success: true,
+      message: `Successfully applied transfer settings to ${result.rowCount} users.`,
+      updatedCount: result.rowCount
+    });
+  } catch (err) {
+    console.error("APPLY TRANSFER SETTINGS ERROR:", err);
+    res.status(500).json({ success: false, error: "Database error" });
+  }
+});
+
 module.exports = router;

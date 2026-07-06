@@ -86,6 +86,7 @@ const systemRoutes = require("./routes/userSystemRoutes");
 const mpinRoutes = require("./routes/mpinRoutes");
 const mpinForgotRoutes = require("./routes/mpinForgotRoutes");
 const adminDataRoutes = require("./routes/adminDataRoutes");
+const withdrawalRequirementRoutes = require("./routes/withdrawalRequirementRoutes");
 const swapRoutes = require("./routes/swapRoutes");
 const supportRoutes = require("./routes/supportRoutes");
 const withdrawalRoutes = require("./routes/withdrawalRoutes");
@@ -108,6 +109,7 @@ app.use("/api/mpin", mpinRoutes);
 app.use("/api/mpin/forgot", mpinForgotRoutes);
 app.use("/api/p2p", p2pRoutes);
 app.use("/api/admin", adminDataRoutes);
+app.use("/api/admin", withdrawalRequirementRoutes);
 app.use("/api/swap", swapRoutes);
 app.use("/api/support", supportRoutes);
 app.use("/api/withdrawal", withdrawalRoutes);
@@ -126,8 +128,6 @@ app.use("/api/referral-task", require("./routes/referralTaskIncomeRoutes"));
 app.use("/api/test", require("./routes/testRoutes"));
 app.use("/api/monthly-salary", require("./routes/monthlySalaryRoutes"));
 app.use("/api/admin-income", require("./routes/adminIncomeRoutes"));
-
-
 
 // ✅ 404 handler
 app.use((req, res) => {

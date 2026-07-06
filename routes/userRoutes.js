@@ -1070,4 +1070,75 @@ router.get("/users/:userId/commission", async (req, res) => {
   }
 });
 
+router.get("/users/withdrawal-status/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // 1. Fetch user's requirement configuration
+    const userResult = await pool.query(
+      `SELECT id, withdraw_req_count, withdraw_req_started_at, withdraw_req_completed 
+       FROM users WHERE id = $1`,
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const { withdraw_req_count, withdraw_req_started_at, withdraw_req_completed } = userResult.rows[0];
+
+    // If no requirement is active, they are eligible
+    if (withdraw_req_completed) {
+      return res.json({
+        success: true,
+        withdraw_req_completed: true,
+        withdraw_req_count: Number(withdraw_req_count),
+        active_referrals_count: Number(withdraw_req_count),
+        remaining_referrals: 0,
+        withdraw_req_started_at
+      });
+    }
+
+    // 2. Count referred users who joined after withdraw_req_started_at and have an approved deposit request
+    const countResult = await pool.query(
+      `SELECT COUNT(*) FROM users u
+       WHERE u.parent_id = $1
+         AND u.created_at >= $2
+         AND EXISTS (
+           SELECT 1 FROM payment_requests pr
+           WHERE pr.user_id = u.id AND pr.status = 'approved'
+         )`,
+      [userId, withdraw_req_started_at]
+    );
+
+    const activeReferralsCount = Number(countResult.rows[0].count);
+    const requiredCount = Number(withdraw_req_count);
+
+    let isCompletedNow = withdraw_req_completed;
+    let remaining = Math.max(0, requiredCount - activeReferralsCount);
+
+    // 3. Auto-unlock user if condition is met
+    if (activeReferralsCount >= requiredCount) {
+      await pool.query(
+        "UPDATE users SET withdraw_req_completed = TRUE WHERE id = $1",
+        [userId]
+      );
+      isCompletedNow = true;
+      remaining = 0;
+    }
+
+    res.json({
+      success: true,
+      withdraw_req_completed: isCompletedNow,
+      withdraw_req_count: requiredCount,
+      active_referrals_count: activeReferralsCount,
+      remaining_referrals: remaining,
+      withdraw_req_started_at
+    });
+  } catch (err) {
+    console.error("Get withdrawal status error:", err);
+    res.status(500).json({ error: "Failed to fetch withdrawal status" });
+  }
+});
+
 module.exports = router;

@@ -118,6 +118,16 @@ router.post("/transfer", async (req, res) => {
   const client = await pool.connect();
 
   try {
+    const settingsRes = await client.query("SELECT transfer_enabled FROM system_settings LIMIT 1");
+    if (settingsRes.rows.length > 0 && !settingsRes.rows[0].transfer_enabled) {
+      return res.status(403).json({ error: "This service is currently unavailable. Please contact our support team." });
+    }
+
+    const userRes = await client.query("SELECT transfer_blocked FROM users WHERE id = $1", [userId]);
+    if (userRes.rows.length > 0 && userRes.rows[0].transfer_blocked) {
+      return res.status(403).json({ error: "This service is currently unavailable. Please contact our support team." });
+    }
+
     await client.query("BEGIN");
 
    // ================= MAIN → TRADE =================
@@ -254,6 +264,16 @@ router.post("/address-send", async (req, res) => {
 
   try {
     const { senderId, recipientAddress, amount } = req.body;
+
+    const settingsRes = await client.query("SELECT transfer_enabled FROM system_settings LIMIT 1");
+    if (settingsRes.rows.length > 0 && !settingsRes.rows[0].transfer_enabled) {
+      return res.status(403).json({ error: "This service is currently unavailable. Please contact our support team." });
+    }
+
+    const userRes = await client.query("SELECT transfer_blocked FROM users WHERE id = $1", [senderId]);
+    if (userRes.rows.length > 0 && userRes.rows[0].transfer_blocked) {
+      return res.status(403).json({ error: "This service is currently unavailable. Please contact our support team." });
+    }
 
     await client.query("BEGIN");
 

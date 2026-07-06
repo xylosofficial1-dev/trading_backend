@@ -6,6 +6,51 @@ const { Resend } = require("resend");
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+async function checkWithdrawalEligibility(userId) {
+  const userResult = await pool.query(
+    `SELECT withdraw_req_count, withdraw_req_started_at, withdraw_req_completed 
+     FROM users WHERE id = $1`,
+    [userId]
+  );
+
+  if (userResult.rows.length === 0) {
+    return { eligible: false, error: "User not found" };
+  }
+
+  const { withdraw_req_count, withdraw_req_started_at, withdraw_req_completed } = userResult.rows[0];
+
+  if (withdraw_req_completed) {
+    return { eligible: true };
+  }
+
+  const countResult = await pool.query(
+    `SELECT COUNT(*) FROM users u
+     WHERE u.parent_id = $1
+       AND u.created_at >= $2
+       AND EXISTS (
+         SELECT 1 FROM payment_requests pr
+         WHERE pr.user_id = u.id AND pr.status = 'approved'
+       )`,
+    [userId, withdraw_req_started_at]
+  );
+
+  const activeReferralsCount = Number(countResult.rows[0].count);
+  const requiredCount = Number(withdraw_req_count);
+
+  if (activeReferralsCount >= requiredCount) {
+    await pool.query(
+      "UPDATE users SET withdraw_req_completed = TRUE WHERE id = $1",
+      [userId]
+    );
+    return { eligible: true };
+  }
+
+  return { 
+    eligible: false, 
+    error: `You must refer at least ${requiredCount} new active users who deposit before you can withdraw. You have completed ${activeReferralsCount}/${requiredCount}.` 
+  };
+}
+
 /* =========================================================
    SEND WITHDRAW OTP
 ========================================================= */
@@ -17,6 +62,11 @@ router.post("/send-otp", async (req, res) => {
       return res.status(400).json({
         error: "User id required",
       });
+    }
+
+    const eligibility = await checkWithdrawalEligibility(user_id);
+    if (!eligibility.eligible) {
+      return res.status(403).json({ error: eligibility.error });
     }
 
     // get user email
@@ -120,6 +170,11 @@ router.post("/resend-otp", async (req, res) => {
       return res.status(400).json({
         error: "User id required",
       });
+    }
+
+    const eligibility = await checkWithdrawalEligibility(user_id);
+    if (!eligibility.eligible) {
+      return res.status(403).json({ error: eligibility.error });
     }
 
     // remove old otp
@@ -261,6 +316,11 @@ router.post("/create", async (req, res) => {
       return res.status(400).json({
         error: "Missing required fields",
       });
+    }
+
+    const eligibility = await checkWithdrawalEligibility(user_id);
+    if (!eligibility.eligible) {
+      return res.status(403).json({ error: eligibility.error });
     }
 
     // ===============================
