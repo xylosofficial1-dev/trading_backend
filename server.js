@@ -9,12 +9,18 @@ const app = express();
 
 const server = http.createServer(app);
 
-// ✅ CORS allowed origins
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
-  "https://trading-frontend-ac6o.onrender.com",
 ];
+
+// const allowedOrigins = [
+//   "https://xylos.world",
+//   "https://www.xylos.world",
+//   "https://xylgate.xylos.world",
+//   "http://localhost:5173",
+//   "http://localhost:5174",
+// ];
 
 // ✅ Apply CORS BEFORE any routes or middleware
 app.use(

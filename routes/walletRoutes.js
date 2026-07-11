@@ -129,7 +129,7 @@ router.post("/transfer", async (req, res) => {
     }
 
     await client.query("BEGIN");
-
+console.log("STEP 1: BEGIN");
    // ================= MAIN → TRADE =================
 if (type === "MAIN_TO_TRADE") {
 
@@ -140,6 +140,7 @@ if (type === "MAIN_TO_TRADE") {
      FOR UPDATE`,
     [userId]
   );
+  console.log("STEP 2: User loaded", rows[0]);
 
   if (!rows.length || Number(rows[0].wallet_amount) < amount) {
     throw new Error("Insufficient Primary Credit Balance balance");
@@ -154,6 +155,7 @@ await client.query(
   [amount, userId]
 );
 
+console.log("STEP 3: Wallet updated");
 // 2️⃣ Store business volume ONLY when activated
 await client.query(
   `
@@ -166,10 +168,11 @@ await client.query(
   `,
   [userId, 'MAIN_TO_TRADE', amount]
 );
+console.log("STEP 4: wallet_transfers inserted");
 
   // 2️⃣ 🔥 ADD THIS LINE (VERY IMPORTANT)
   await distributeLevelCommission(client, userId, amount);
-
+console.log("STEP 5: Commission completed");
   // 🔔 Notify user about transfer
 await client.query(
   `INSERT INTO notifications 
@@ -181,6 +184,7 @@ await client.query(
     String(userId)   // store as text
   ]
 );
+console.log("STEP 6: Notification inserted");
 }
     // ================= TRADE → MAIN =================
   else if (type === "TRADE_TO_MAIN") {
