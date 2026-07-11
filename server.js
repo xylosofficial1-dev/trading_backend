@@ -12,6 +12,7 @@ const server = http.createServer(app);
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
+   "https://trading-frontend-ac6o.onrender.com",
 ];
 
 // const allowedOrigins = [
@@ -41,6 +42,7 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+app.options("*", cors());
 
 
 // ✅ Body parsing middleware
